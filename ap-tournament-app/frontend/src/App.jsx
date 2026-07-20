@@ -7,7 +7,7 @@ import Dashboard from './views/Dashboard';
 import AdminPanel from './views/Admin/AdminPanel';
 import LiveStandings from './views/Public/LiveStandings';
 import TournamentHub from './views/TournamentHub';
-import SetupTab from './views/TournamentHub/SetupTab';
+import SetupTab, { CreateTournamentPage } from './views/TournamentHub/SetupTab';
 import TeamsTab from './views/TournamentHub/TeamsTab';
 import MatchInputTab from './views/TournamentHub/MatchInputTab';
 import LeaderboardTab from './views/TournamentHub/LeaderboardTab';
@@ -39,7 +39,7 @@ export default function App() {
         <Route path="/admin" element={<ProtectedRoute><AppLayout><AdminPanel /></AppLayout></ProtectedRoute>} />
 
         <Route path="/tournament/new" element={
-          <ProtectedRoute><AppLayout><SetupTab /></AppLayout></ProtectedRoute>
+          <ProtectedRoute><AppLayout><CreateTournamentPage /></AppLayout></ProtectedRoute>
         } />
 
         <Route path="/tournament/:id" element={

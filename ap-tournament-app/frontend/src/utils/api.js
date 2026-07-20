@@ -1,4 +1,18 @@
-const API = '/api';
+/**
+ * API base URL resolution:
+ * - Local dev: empty -> `/api` (Vite proxy to backend)
+ * - VPS/production: set VITE_API_BASE_URL=http://<IP>:5001/api
+ */
+const envBase = import.meta.env.VITE_API_BASE_URL;
+
+function resolveApiBase() {
+  if (envBase) {
+    return envBase.replace(/\/$/, '');
+  }
+  return '/api';
+}
+
+export const API_BASE = resolveApiBase();
 
 function getToken() {
   return localStorage.getItem('ap_token');
@@ -9,7 +23,18 @@ async function request(path, options = {}) {
   const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
 
-  const res = await fetch(`${API}${path}`, { ...options, headers });
+  const url = `${API_BASE}${path}`;
+
+  let res;
+  try {
+    res = await fetch(url, { ...options, headers });
+  } catch (err) {
+    throw new Error(
+      `Network error: cannot reach API at ${API_BASE}. ` +
+      (err.message || 'Check VITE_API_BASE_URL and backend status.')
+    );
+  }
+
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
   return data;
