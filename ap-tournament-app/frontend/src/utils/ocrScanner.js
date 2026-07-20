@@ -1,6 +1,6 @@
 import Tesseract from 'tesseract.js';
 
-const RECOGNIZE_TIMEOUT_MS = 15000;
+const RECOGNIZE_TIMEOUT_MS = 25000;
 
 let workerInstance = null;
 

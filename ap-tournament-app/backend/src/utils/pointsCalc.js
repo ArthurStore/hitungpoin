@@ -59,6 +59,7 @@ export function aggregateStandings(matches, teams) {
       booyahCount: 0,
       matchesPlayed: 0,
       placements: [],
+      matchScores: {},
     };
   });
 
@@ -76,6 +77,7 @@ export function aggregateStandings(matches, teams) {
             booyahCount: 0,
             matchesPlayed: 0,
             placements: [],
+            matchScores: {},
           };
         }
         const s = standings[key];
@@ -84,6 +86,7 @@ export function aggregateStandings(matches, teams) {
         s.booyahCount += r.isBooyah ? 1 : 0;
         s.matchesPlayed += 1;
         s.placements.push(r.placement);
+        s.matchScores[match.matchNumber] = r.totalPoints || 0;
       });
     });
 

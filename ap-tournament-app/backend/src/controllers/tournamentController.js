@@ -52,17 +52,22 @@ export async function createTournament(req, res) {
     const ownerId = req.user._id;
     const {
       name, logo, format, inputMode, targetPoints, totalMatches,
-      matchConfigs, rosterText, teams: teamsInput,
+      matchConfigs, rosterText, teams: teamsInput, scoringRules,
     } = req.body;
 
     const parsedTeams = rosterText ? parseRosterInput(rosterText) : teamsInput || [];
     const configs = buildMatchConfigs(totalMatches, matchConfigs);
+    const rules = scoringRules || {
+      placementPoints: { 1: 12, 2: 9, 3: 8, 4: 7, 5: 6, 6: 5, 7: 4, 8: 3, 9: 2, 10: 1, 11: 0, 12: 0 },
+      killPoint: 1,
+      booyahBonus: 5,
+    };
 
     if (isMemoryStore()) {
       const tournament = memoryStore.createTournament({
         name, logo, format: format || 'One Day', inputMode: inputMode || 'cr_biasa',
         targetPoints: targetPoints || 80, totalMatches: configs.length,
-        matchConfigs: configs, ownerId, status: 'active',
+        matchConfigs: configs, ownerId, status: 'active', scoringRules: rules,
       });
       const teams = memoryStore.createTeams(parsedTeams.map((t) => ({ ...t, tournamentId: tournament._id })));
       configs.forEach((cfg) => {
@@ -73,7 +78,7 @@ export async function createTournament(req, res) {
 
     const tournament = await Tournament.create({
       name, logo, format, inputMode, targetPoints, totalMatches: configs.length,
-      matchConfigs: configs, ownerId, status: 'active',
+      matchConfigs: configs, ownerId, status: 'active', scoringRules: rules,
     });
     const teams = await Team.insertMany(parsedTeams.map((t) => ({ ...t, tournamentId: tournament._id })));
     tournament.teams = teams.map((t) => t._id);

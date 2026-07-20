@@ -3,7 +3,12 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../../utils/api';
 import Button from '../../components/Button';
 import Toast from '../../components/Toast';
-import { MAPS, FORMATS } from '../../utils/pointsCalc';
+import LogoDropzone from '../../components/LogoDropzone';
+import ScoringRulesEditor from '../../components/ScoringRulesEditor';
+import {
+  MAPS, FORMATS, MATCH_COUNT_OPTIONS,
+  buildDefaultScoringRules, buildMatchConfigs,
+} from '../../utils/pointsCalc';
 
 export default function SetupTabContent({ isNew, tournament, refresh }) {
   const navigate = useNavigate();
@@ -17,18 +22,21 @@ export default function SetupTabContent({ isNew, tournament, refresh }) {
     inputMode: tournament?.inputMode || 'cr_biasa',
     totalMatches: tournament?.totalMatches || 6,
     targetPoints: tournament?.targetPoints || 80,
-    matchConfigs: tournament?.matchConfigs || [],
+    matchConfigs: tournament?.matchConfigs?.length
+      ? tournament.matchConfigs
+      : buildMatchConfigs(tournament?.totalMatches || 6),
     rosterText: '',
+    scoringRules: tournament?.scoringRules || buildDefaultScoringRules(),
   });
 
   const update = (k, v) => setForm((p) => ({ ...p, [k]: v }));
 
-  const handleLogo = (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => update('logo', reader.result);
-    reader.readAsDataURL(file);
+  const handleTotalMatchesChange = (count) => {
+    setForm((p) => ({
+      ...p,
+      totalMatches: count,
+      matchConfigs: buildMatchConfigs(count, p.matchConfigs),
+    }));
   };
 
   const handleSave = async () => {
@@ -41,17 +49,15 @@ export default function SetupTabContent({ isNew, tournament, refresh }) {
     setToast({ message: '', type: 'info' });
 
     try {
-      const configs = Array.from({ length: form.totalMatches }, (_, i) => ({
-        matchNumber: i + 1,
-        map: form.matchConfigs[i]?.map || MAPS[i % MAPS.length],
-      }));
+      const configs = buildMatchConfigs(form.totalMatches, form.matchConfigs);
+      const payload = { ...form, matchConfigs: configs };
 
       if (isNew) {
-        const created = await api.createTournament({ ...form, matchConfigs: configs });
+        const created = await api.createTournament(payload);
         setToast({ message: 'Tournament created successfully!', type: 'success' });
         setTimeout(() => navigate(`/tournament/${created._id}/teams`, { replace: true }), 600);
       } else {
-        await api.updateTournament(tournament._id, { ...form, matchConfigs: configs });
+        await api.updateTournament(tournament._id, payload);
         if (form.rosterText.trim()) {
           await api.updateTeams(tournament._id, { rosterText: form.rosterText });
         }
@@ -60,10 +66,7 @@ export default function SetupTabContent({ isNew, tournament, refresh }) {
       }
     } catch (err) {
       console.error('Save setup failed:', err);
-      setToast({
-        message: err.message || 'Failed to save. Check API connection.',
-        type: 'error',
-      });
+      setToast({ message: err.message || 'Failed to save.', type: 'error' });
     } finally {
       setSaving(false);
     }
@@ -81,9 +84,8 @@ export default function SetupTabContent({ isNew, tournament, refresh }) {
         </div>
 
         <div>
-          <label className="mb-2 block text-sm text-slate-300">Logo</label>
-          <input type="file" accept="image/*" onChange={handleLogo} disabled={saving} className="text-sm text-slate-400" />
-          {form.logo && <img src={form.logo} alt="" className="mt-2 h-16 w-16 rounded-lg object-cover" />}
+          <label className="mb-2 block text-sm text-slate-300">Event Logo</label>
+          <LogoDropzone value={form.logo} onChange={(v) => update('logo', v)} disabled={saving} />
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2">
@@ -95,12 +97,21 @@ export default function SetupTabContent({ isNew, tournament, refresh }) {
             </select>
           </div>
           <div>
-            <label className="mb-2 block text-sm text-slate-300">Total Matches (1-10+)</label>
-            <input type="number" min={1} max={20} value={form.totalMatches} disabled={saving}
-              onChange={(e) => update('totalMatches', parseInt(e.target.value, 10) || 1)}
-              className="w-full rounded-xl border border-white/10 bg-slate-800 px-4 py-3 font-mono text-white" />
+            <label className="mb-2 block text-sm text-slate-300">Total Matches</label>
+            <select value={form.totalMatches} onChange={(e) => handleTotalMatchesChange(parseInt(e.target.value, 10))} disabled={saving}
+              className="w-full rounded-xl border border-white/10 bg-slate-800 px-4 py-3 text-white">
+              {MATCH_COUNT_OPTIONS.map((n) => (
+                <option key={n} value={n}>{n} Match{n > 1 ? 'es' : ''}</option>
+              ))}
+            </select>
           </div>
         </div>
+
+        <ScoringRulesEditor
+          rules={form.scoringRules}
+          onChange={(r) => update('scoringRules', r)}
+          disabled={saving}
+        />
 
         <div>
           <label className="mb-2 block text-sm text-slate-300">Default Input Mode</label>
@@ -117,19 +128,17 @@ export default function SetupTabContent({ isNew, tournament, refresh }) {
         <div>
           <label className="mb-2 block text-sm text-slate-300">Map per Match</label>
           <div className="space-y-2">
-            {Array.from({ length: form.totalMatches }, (_, i) => (
-              <div key={i} className="flex items-center gap-3 rounded-lg bg-slate-800/40 px-3 py-2">
-                <span className="w-16 font-mono text-xs text-gold">M{i + 1}</span>
+            {form.matchConfigs.map((mc, i) => (
+              <div key={mc.matchNumber} className="flex items-center gap-3 rounded-lg bg-slate-800/40 px-3 py-2">
+                <span className="w-16 font-mono text-xs text-gold">M{mc.matchNumber}</span>
                 <select
                   disabled={saving}
-                  value={form.matchConfigs[i]?.map || MAPS[i % MAPS.length]}
+                  value={mc.map}
                   onChange={(e) => {
-                    const mc = Array.from({ length: form.totalMatches }, (_, j) => ({
-                      matchNumber: j + 1,
-                      map: form.matchConfigs[j]?.map || MAPS[j % MAPS.length],
-                    }));
-                    mc[i] = { matchNumber: i + 1, map: e.target.value };
-                    update('matchConfigs', mc);
+                    const updated = form.matchConfigs.map((m, j) =>
+                      j === i ? { ...m, map: e.target.value } : m
+                    );
+                    update('matchConfigs', updated);
                   }}
                   className="flex-1 rounded-lg border border-white/10 bg-slate-900 px-2 py-1.5 text-sm text-white"
                 >
@@ -152,11 +161,7 @@ export default function SetupTabContent({ isNew, tournament, refresh }) {
         </Button>
       </div>
 
-      <Toast
-        message={toast.message}
-        type={toast.type}
-        onClose={() => setToast({ message: '', type: 'info' })}
-      />
+      <Toast message={toast.message} type={toast.type} onClose={() => setToast({ message: '', type: 'info' })} />
     </>
   );
 }

@@ -1,3 +1,11 @@
+export const DEFAULT_PLACEMENT_POINTS = {
+  1: 12, 2: 9, 3: 8, 4: 7, 5: 6, 6: 5,
+  7: 4, 8: 3, 9: 2, 10: 1, 11: 0, 12: 0,
+};
+
+export const DEFAULT_KILL_POINT = 1;
+export const DEFAULT_BOOYAH_BONUS = 5;
+
 export const MAPS = [
   'Bermuda', 'Kalahari', 'Purgatory', 'Nexterra', 'Alpine',
   'Bermuda Remastered', 'Solara',
@@ -10,25 +18,118 @@ export const FORMATS = [
   { id: 'CR League', label: 'CR League', matches: 6 },
 ];
 
-export const LEADERBOARD_THEMES = {
-  classic: { name: 'Classic', bg: '#1e293b', header: '#ef4444', row: '#334155', text: '#f1f5f9', accent: '#ef4444' },
-  neon: { name: 'Neon', bg: '#0f0f23', header: '#ff006e', row: '#1a1a2e', text: '#00f5d4', accent: '#ff006e' },
-  minimal: { name: 'Minimal', bg: '#ffffff', header: '#0f172a', row: '#f8fafc', text: '#0f172a', accent: '#0f172a' },
-  darkPro: { name: 'Dark Pro', bg: '#111827', header: '#f59e0b', row: '#1f2937', text: '#f9fafb', accent: '#f59e0b' },
-};
+export const MATCH_COUNT_OPTIONS = Array.from({ length: 10 }, (_, i) => i + 1);
 
-export function calcMatchPoints(results, mode = 'cr_biasa') {
-  const placementPts = { 1: 12, 2: 9, 3: 8, 4: 7, 5: 6, 6: 5, 7: 4, 8: 3, 9: 2, 10: 1, 11: 0, 12: 0 };
+export function getScoringRules(tournament) {
+  const pp = tournament?.scoringRules?.placementPoints;
+  return {
+    placementPoints: pp ? { ...DEFAULT_PLACEMENT_POINTS, ...pp } : { ...DEFAULT_PLACEMENT_POINTS },
+    killPoint: tournament?.scoringRules?.killPoint ?? DEFAULT_KILL_POINT,
+    booyahBonus: tournament?.scoringRules?.booyahBonus ?? DEFAULT_BOOYAH_BONUS,
+  };
+}
+
+export function buildDefaultScoringRules() {
+  return {
+    placementPoints: { ...DEFAULT_PLACEMENT_POINTS },
+    killPoint: DEFAULT_KILL_POINT,
+    booyahBonus: DEFAULT_BOOYAH_BONUS,
+  };
+}
+
+export function calcMatchPoints(results, mode = 'cr_biasa', scoringRules = {}) {
+  const placementPts = { ...DEFAULT_PLACEMENT_POINTS, ...scoringRules.placementPoints };
+  const killPt = scoringRules.killPoint ?? DEFAULT_KILL_POINT;
+  const booyahBonus = scoringRules.booyahBonus ?? DEFAULT_BOOYAH_BONUS;
+
   return results.map((r) => {
     if (mode === 'cr_league') {
       const placement = r.placement || r.rank;
       const totalScore = parseInt(r.totalScore ?? r.score ?? 0, 10);
-      return { ...r, placement, totalPoints: totalScore, totalScore, isBooyah: placement === 1, mode: 'cr_league' };
+      return {
+        ...r,
+        placement,
+        totalPoints: totalScore,
+        totalScore,
+        isBooyah: placement === 1,
+        mode: 'cr_league',
+      };
     }
+
     const placement = Math.min(12, Math.max(1, r.placement || 12));
     const kills = parseInt(r.kills, 10) || 0;
     const pp = placementPts[placement] ?? 0;
-    const bonus = placement === 1 ? 5 : 0;
-    return { ...r, placement, kills, placementPoints: pp, killPoints: kills, totalPoints: pp + kills + bonus, isBooyah: placement === 1, mode: 'cr_biasa' };
+    const kp = kills * killPt;
+    const bonus = placement === 1 ? booyahBonus : 0;
+
+    return {
+      ...r,
+      placement,
+      kills,
+      placementPoints: pp,
+      killPoints: kp,
+      totalPoints: pp + kp + bonus,
+      isBooyah: placement === 1,
+      mode: 'cr_biasa',
+    };
   });
+}
+
+export function calcSingleRowPoints(placement, kills, mode, scoringRules) {
+  const [row] = calcMatchPoints(
+    [{ placement, kills, totalScore: kills }],
+    mode,
+    scoringRules
+  );
+  return row?.totalPoints ?? 0;
+}
+
+export function buildMatchConfigs(totalMatches, existing = []) {
+  return Array.from({ length: totalMatches }, (_, i) => ({
+    matchNumber: i + 1,
+    map: existing[i]?.map || MAPS[i % MAPS.length],
+  }));
+}
+
+export function aggregateStandingsWithMatches(matches, teams) {
+  const standings = {};
+
+  teams.forEach((team) => {
+    standings[team._id] = {
+      teamId: team._id,
+      teamName: team.name,
+      totalPoints: 0,
+      totalKills: 0,
+      booyahCount: 0,
+      matchScores: {},
+    };
+  });
+
+  (matches || [])
+    .filter((m) => m.status === 'verified' || m.status === 'completed')
+    .forEach((match) => {
+      (match.results || []).forEach((r) => {
+        const key = r.teamId || r.teamName;
+        if (!standings[key]) {
+          standings[key] = {
+            teamId: r.teamId,
+            teamName: r.teamName,
+            totalPoints: 0,
+            totalKills: 0,
+            booyahCount: 0,
+            matchScores: {},
+          };
+        }
+        const s = standings[key];
+        const pts = r.totalPoints || 0;
+        s.totalPoints += pts;
+        s.totalKills += r.kills || 0;
+        s.booyahCount += r.isBooyah ? 1 : 0;
+        s.matchScores[match.matchNumber] = pts;
+      });
+    });
+
+  return Object.values(standings)
+    .sort((a, b) => b.totalPoints - a.totalPoints || b.booyahCount - a.booyahCount)
+    .map((s, i) => ({ ...s, rank: i + 1 }));
 }
