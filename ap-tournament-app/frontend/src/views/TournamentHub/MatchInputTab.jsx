@@ -74,7 +74,7 @@ export default function MatchInputTab() {
 
     try {
       addLog(`Mode: ${inputMode === 'cr_league' ? 'CR League' : 'CR Biasa'}`);
-      addLog(`Multi-pass OCR: ${files.length} screenshot(s) (max ${MAX_SCREENSHOTS})`);
+      addLog(`Gemini Vision multi-pass: ${files.length} screenshot(s)`);
 
       const dataUrls = [];
       for (let i = 0; i < files.length; i += 1) {
@@ -138,29 +138,30 @@ export default function MatchInputTab() {
           totalPoints: r.totalPoints,
         }));
 
-      // Prefer operator-adjusted totals when provided
-      const scored = calcMatchPoints(payload, inputMode, scoringRules).map((row, i) => {
+      const scored = calcMatchPoints(payload, 'cr_biasa', scoringRules).map((row, i) => {
         const src = payload[i];
-        if (src.placementPoints != null && inputMode !== 'cr_league') {
-          const killPt = scoringRules.killPoint ?? 1;
-          const pp = src.placementPoints;
-          const kp = (src.kills || 0) * killPt;
-          return {
-            ...row,
-            placementPoints: pp,
-            killPoints: kp,
-            totalPoints: src.totalPoints != null ? src.totalPoints : (pp + kp),
-          };
-        }
-        return row;
+        const killPt = scoringRules.killPoint ?? 1;
+        const pp = src.placementPoints != null
+          ? src.placementPoints
+          : row.placementPoints;
+        const kp = (src.kills || 0) * killPt;
+        return {
+          ...row,
+          placementPoints: pp,
+          killPoints: kp,
+          totalPoints: src.totalPoints != null ? src.totalPoints : (pp + kp),
+        };
       });
 
       await api.submitMatchResults(tournament._id, {
         matchNumber,
         results: scored,
-        inputMode,
+        inputMode: 'cr_biasa',
         ocrProcessed: verifiedResults.length > 0,
       });
+      if (!verifiedResults.length) {
+        try { await api.recordManualScan(); } catch { /* ignore */ }
+      }
       await refresh();
       setFiles([]);
       setPreviews((prev) => { prev.forEach((u) => URL.revokeObjectURL(u)); return []; });
@@ -197,7 +198,6 @@ export default function MatchInputTab() {
         onClose={() => setManualOpen(false)}
         imageUrls={previews}
         teams={teams}
-        inputMode={inputMode}
         tournament={tournament}
         initialRows={manualInitialRows}
         nicknames={nicknames}

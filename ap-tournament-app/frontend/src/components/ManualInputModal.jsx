@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import {
   X, MagnifyingGlassPlus, MagnifyingGlassMinus, ArrowsOut, ArrowCounterClockwise,
   CaretLeft, CaretRight,
@@ -15,19 +15,22 @@ const STEPS = [
   { id: 3, label: 'Adjust & Submit' },
 ];
 
+function placementPtsFor(placement, rules) {
+  const base = getDefaultPlacementPoints(placement, rules);
+  const bonus = placement === 1 ? (rules.booyahBonus || 0) : 0;
+  return base + bonus;
+}
+
 function buildEmptyRows(scoringRules) {
   return Array.from({ length: SLOT_COUNT }, (_, i) => {
     const placement = i + 1;
-    const pp = getDefaultPlacementPoints(placement, scoringRules);
-    const booyah = placement === 1 ? (scoringRules.booyahBonus || 0) : 0;
     return {
       placement,
       teamId: '',
       teamName: '',
       ocrNickname: '',
       kills: '',
-      placementPoints: pp + booyah,
-      totalScore: '',
+      placementPoints: placementPtsFor(placement, scoringRules),
     };
   });
 }
@@ -70,13 +73,13 @@ function ImageViewer({ imageUrls = [], activeIndex = 0, onSelectImage }) {
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-2 border-b border-white/5 px-3 py-2">
-        <button type="button" onClick={() => setZoom((z) => Math.min(4, z + 0.25))} className="rounded p-1.5 text-slate-400 hover:bg-white/5 hover:text-white" title="Zoom In">
+        <button type="button" onClick={() => setZoom((z) => Math.min(4, z + 0.25))} className="rounded p-1.5 text-slate-400 hover:bg-white/5 hover:text-white">
           <MagnifyingGlassPlus size={18} />
         </button>
-        <button type="button" onClick={() => setZoom((z) => Math.max(0.5, z - 0.25))} className="rounded p-1.5 text-slate-400 hover:bg-white/5 hover:text-white" title="Zoom Out">
+        <button type="button" onClick={() => setZoom((z) => Math.max(0.5, z - 0.25))} className="rounded p-1.5 text-slate-400 hover:bg-white/5 hover:text-white">
           <MagnifyingGlassMinus size={18} />
         </button>
-        <button type="button" onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }); }} className="rounded p-1.5 text-slate-400 hover:bg-white/5 hover:text-white" title="Reset">
+        <button type="button" onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }); }} className="rounded p-1.5 text-slate-400 hover:bg-white/5 hover:text-white">
           <ArrowCounterClockwise size={18} />
         </button>
         <span className="ml-auto font-mono text-xs text-slate-500">{Math.round(zoom * 100)}% · Drag to pan</span>
@@ -122,7 +125,6 @@ export default function ManualInputModal({
   imageUrl,
   imageUrls,
   teams = [],
-  inputMode = 'cr_biasa',
   tournament,
   initialRows,
   nicknames = [],
@@ -132,9 +134,10 @@ export default function ManualInputModal({
 }) {
   const scoringRules = useMemo(() => getScoringRules(tournament), [tournament]);
   const urls = imageUrls?.length ? imageUrls : (imageUrl ? [imageUrl] : []);
+  const killPt = scoringRules.killPoint ?? 1;
 
   const [step, setStep] = useState(startStep);
-  const [rows, setRows] = useState(() => buildEmptyRows(getScoringRules(tournament)));
+  const [rows, setRows] = useState(() => buildEmptyRows(scoringRules));
   const [nickMap, setNickMap] = useState([]);
   const [activeImg, setActiveImg] = useState(0);
   const [fullscreen, setFullscreen] = useState(false);
@@ -150,17 +153,13 @@ export default function ManualInputModal({
       initialRows.forEach((r) => {
         const idx = (r.placement || 1) - 1;
         if (idx < 0 || idx >= SLOT_COUNT) return;
-        const pp = r.placementPoints ?? getDefaultPlacementPoints(r.placement, rules)
-          + (r.placement === 1 ? (rules.booyahBonus || 0) : 0);
         base[idx] = {
           ...base[idx],
-          ...r,
           teamId: r.teamId || '',
           teamName: r.teamName || r.matchedTeamName || '',
           ocrNickname: r.ocrNickname || r.nickname || r.teamName || '',
           kills: r.kills ?? '',
-          placementPoints: pp,
-          totalScore: r.totalScore ?? '',
+          placementPoints: placementPtsFor(r.placement || idx + 1, rules),
         };
       });
     }
@@ -174,7 +173,6 @@ export default function ManualInputModal({
           nickname: r.nickname || r.teamName,
           kills: r.kills || 0,
           placements: r.placement ? [r.placement] : [],
-          hits: 1,
         }));
 
     setNickMap(nicks.map((n) => {
@@ -194,7 +192,6 @@ export default function ManualInputModal({
         teamName: fromRow?.teamName || matched?.name || '',
       };
     }));
-  // intentionally re-init when modal opens / OCR payload changes
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, initialRows, nicknames, startStep, teams, tournament]);
 
@@ -215,7 +212,6 @@ export default function ManualInputModal({
             kills: next[idx].kills !== '' ? next[idx].kills : (n.kills || ''),
           };
         } else {
-          // fill first empty slot
           const empty = next.findIndex((r) => !r.teamId);
           if (empty >= 0) {
             next[empty] = {
@@ -232,17 +228,8 @@ export default function ManualInputModal({
     });
   };
 
-  const updateRow = (idx, field, value) => {
-    setRows((prev) => prev.map((r, i) => {
-      if (i !== idx) return r;
-      const updated = { ...r, [field]: value };
-      if (field === 'placement') {
-        const p = parseInt(value, 10) || r.placement;
-        updated.placementPoints = getDefaultPlacementPoints(p, scoringRules)
-          + (p === 1 ? (scoringRules.booyahBonus || 0) : 0);
-      }
-      return updated;
-    }));
+  const updateKills = (idx, value) => {
+    setRows((prev) => prev.map((r, i) => (i === idx ? { ...r, kills: value } : r)));
   };
 
   const onTeamSelect = (idx, teamId) => {
@@ -269,24 +256,20 @@ export default function ManualInputModal({
   const handleSubmit = () => {
     const payload = filledRows.map((r) => {
       const kills = parseInt(r.kills, 10) || 0;
-      const placementPoints = parseInt(r.placementPoints, 10) || 0;
-      const total = inputMode === 'cr_league'
-        ? (parseInt(r.totalScore, 10) || kills)
-        : calcLiveTotal({
-          placement: r.placement,
-          kills,
-          placementPoints,
-          mode: inputMode,
-          scoringRules,
-        });
+      const placementPoints = placementPtsFor(r.placement, scoringRules);
+      const total = calcLiveTotal({
+        placement: r.placement,
+        kills,
+        placementPoints,
+        mode: 'cr_biasa',
+        scoringRules,
+      });
       return {
         ...r,
         kills,
         placementPoints,
         totalPoints: total,
-        totalScore: inputMode === 'cr_league' ? total : kills,
-        // mark as pre-scored so backend can use placementPoints if needed
-        _manualPlacementPoints: placementPoints,
+        totalScore: kills,
       };
     });
     onSubmit(payload);
@@ -294,14 +277,13 @@ export default function ManualInputModal({
 
   if (!open) return null;
 
-  const inputCls = 'rounded-lg border border-white/10 bg-slate-900 px-2 py-1.5 font-mono text-sm text-white';
+  const inputCls = 'w-16 rounded-lg border border-white/10 bg-slate-900 px-2 py-1.5 font-mono text-sm text-white';
 
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 p-3 backdrop-blur-sm">
       <div className={`flex flex-col overflow-hidden rounded-2xl border border-white/10 bg-slate-900 shadow-2xl ${
         fullscreen ? 'h-[100dvh] w-full max-w-none' : 'h-[92dvh] w-full max-w-7xl'
       }`}>
-        {/* Header */}
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 px-4 py-3">
           <div>
             <h2 className="font-bold text-white">
@@ -314,10 +296,7 @@ export default function ManualInputModal({
                 <button
                   key={s.id}
                   type="button"
-                  onClick={() => {
-                    if (s.id === 1 && nickMap.length) setStep(1);
-                    else if (s.id <= step || (s.id === 2 && nickMap.length === 0)) setStep(s.id);
-                  }}
+                  onClick={() => { if (s.id <= step || s.id === 3) setStep(s.id); }}
                   className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold ${
                     step === s.id ? 'bg-emerald text-white' :
                     step > s.id ? 'bg-emerald/20 text-emerald' : 'bg-slate-800 text-slate-500'
@@ -329,38 +308,32 @@ export default function ManualInputModal({
             </div>
           </div>
           <div className="flex items-center gap-1">
-            <button type="button" onClick={() => setFullscreen((f) => !f)} className="rounded-lg p-2 text-slate-400 hover:bg-white/5 hover:text-white">
+            <button type="button" onClick={() => setFullscreen((f) => !f)} className="rounded-lg p-2 text-slate-400 hover:bg-white/5">
               <ArrowsOut size={18} />
             </button>
-            <button type="button" onClick={onClose} className="rounded-lg p-2 text-slate-400 hover:bg-white/5 hover:text-white">
+            <button type="button" onClick={onClose} className="rounded-lg p-2 text-slate-400 hover:bg-white/5">
               <X size={20} />
             </button>
           </div>
         </div>
 
         <div className="flex flex-1 flex-col overflow-hidden lg:flex-row">
-          {/* Image panel */}
           <div className="flex max-h-[40%] flex-col border-b border-white/10 lg:max-h-none lg:w-[42%] lg:border-b-0 lg:border-r">
             <ImageViewer imageUrls={urls} activeIndex={activeImg} onSelectImage={setActiveImg} />
           </div>
 
-          {/* Form panel */}
           <div className="flex flex-1 flex-col overflow-hidden">
             <div className="flex-1 overflow-y-auto p-4">
               {step === 1 && (
                 <div className="space-y-3">
-                  <p className="text-xs text-slate-400">
-                    Konfirmasi nickname OCR → tim terdaftar. Perbaiki mapping sebelum lanjut.
-                  </p>
+                  <p className="text-xs text-slate-400">Konfirmasi nickname OCR → tim terdaftar.</p>
                   {nickMap.length === 0 ? (
-                    <p className="rounded-xl bg-slate-800/50 p-4 text-sm text-slate-500">
-                      Tidak ada nickname terdeteksi. Lewati ke Step 3 untuk input manual.
-                    </p>
+                    <p className="rounded-xl bg-slate-800/50 p-4 text-sm text-slate-500">Tidak ada nickname. Lanjut ke Step 3 untuk input manual.</p>
                   ) : (
                     <div className="overflow-x-auto rounded-xl border border-white/5">
                       <table className="w-full text-left text-sm">
                         <thead>
-                          <tr className="border-b border-white/10 text-[10px] uppercase tracking-wider text-slate-500">
+                          <tr className="border-b border-white/10 text-[10px] uppercase text-slate-500">
                             <th className="px-3 py-2">OCR Nickname</th>
                             <th className="px-3 py-2">Kills</th>
                             <th className="px-3 py-2">Rank</th>
@@ -372,9 +345,7 @@ export default function ManualInputModal({
                             <tr key={i} className="border-b border-white/5">
                               <td className="px-3 py-2 font-mono text-xs text-cyan-300">{n.nickname}</td>
                               <td className="px-3 py-2 font-mono text-white">{n.kills}</td>
-                              <td className="px-3 py-2 font-mono text-slate-400">
-                                {n.placements?.[0] ? `#${n.placements[0]}` : '—'}
-                              </td>
+                              <td className="px-3 py-2 font-mono text-slate-400">{n.placements?.[0] ? `#${n.placements[0]}` : '—'}</td>
                               <td className="px-3 py-2">
                                 <select
                                   value={n.teamId}
@@ -402,39 +373,34 @@ export default function ManualInputModal({
               {(step === 2 || step === 3) && (
                 <div className="space-y-2">
                   <p className="mb-2 text-xs text-slate-400">
-                    Kolom: Rank · Team · Kills · Placement Pts (editable) · Total (live).
-                    Formula: <span className="font-mono text-emerald">Kills × {scoringRules.killPoint} + PlacementPts</span>
+                    Input hanya <strong className="text-white">Kills</strong>. Placement Pts & Total dihitung otomatis:
+                    {' '}<span className="font-mono text-emerald">Total = Kills × {killPt} + PlacementPts</span>
                   </p>
                   <div className="overflow-x-auto rounded-xl border border-white/5">
-                    <table className="w-full min-w-[520px] text-left text-sm">
+                    <table className="w-full min-w-[480px] text-left text-sm">
                       <thead>
                         <tr className="border-b border-white/10 bg-slate-800/40 text-[10px] uppercase tracking-wider text-slate-500">
-                          <th className="px-2 py-2 w-16">Rank</th>
+                          <th className="w-16 px-2 py-2">Rank</th>
                           <th className="px-2 py-2">Team</th>
-                          <th className="px-2 py-2 w-16">{inputMode === 'cr_league' ? 'Score' : 'Kills'}</th>
-                          <th className="px-2 py-2 w-20">Place Pts</th>
-                          <th className="px-2 py-2 w-16 text-right">Total</th>
+                          <th className="w-20 px-2 py-2">Kills</th>
+                          <th className="w-24 px-2 py-2">Place Pts</th>
+                          <th className="w-16 px-2 py-2 text-right">Total</th>
                         </tr>
                       </thead>
                       <tbody>
                         {rows.map((row, idx) => {
-                          const killsVal = inputMode === 'cr_league'
-                            ? (row.totalScore !== '' ? row.totalScore : row.kills)
-                            : row.kills;
+                          const pp = placementPtsFor(row.placement, scoringRules);
                           const liveTotal = (row.teamId || row.teamName)
-                            ? (inputMode === 'cr_league'
-                              ? (parseInt(killsVal, 10) || 0)
-                              : calcLiveTotal({
-                                placement: row.placement,
-                                kills: row.kills,
-                                placementPoints: row.placementPoints,
-                                mode: inputMode,
-                                scoringRules,
-                              }))
+                            ? calcLiveTotal({
+                              placement: row.placement,
+                              kills: row.kills,
+                              placementPoints: pp,
+                              mode: 'cr_biasa',
+                              scoringRules,
+                            })
                             : '—';
-
-                          const rankLabel = row.placement === 1 ? '🔥 #1' : `#${row.placement}`;
                           const editable = step === 3;
+                          const rankLabel = row.placement === 1 ? '🔥 #1' : `#${row.placement}`;
 
                           return (
                             <tr
@@ -447,15 +413,13 @@ export default function ManualInputModal({
                             >
                               <td className={`px-2 py-1.5 text-xs font-bold ${
                                 row.placement === 1 ? 'text-gold' : row.placement <= 3 ? 'text-slate-200' : 'text-slate-500'
-                              }`}>
-                                {rankLabel}
-                              </td>
+                              }`}>{rankLabel}</td>
                               <td className="px-2 py-1.5">
                                 {editable ? (
                                   <select
                                     value={row.teamId}
                                     onChange={(e) => onTeamSelect(idx, e.target.value)}
-                                    className="w-full min-w-[100px] rounded-lg border border-white/10 bg-slate-900 px-2 py-1.5 text-xs text-white"
+                                    className="w-full min-w-[110px] rounded-lg border border-white/10 bg-slate-900 px-2 py-1.5 text-xs text-white"
                                   >
                                     <option value="">Select Team</option>
                                     {teams.map((t) => <option key={t._id} value={t._id}>{t.name}</option>)}
@@ -463,9 +427,6 @@ export default function ManualInputModal({
                                 ) : (
                                   <span className="text-xs font-semibold text-white">
                                     {row.teamName || <span className="text-slate-600">—</span>}
-                                    {row.ocrNickname && row.ocrNickname !== row.teamName && (
-                                      <span className="ml-1 font-mono text-[10px] text-slate-500">({row.ocrNickname})</span>
-                                    )}
                                   </span>
                                 )}
                               </td>
@@ -474,35 +435,17 @@ export default function ManualInputModal({
                                   <input
                                     type="number"
                                     min="0"
-                                    value={inputMode === 'cr_league' ? row.totalScore : row.kills}
-                                    onChange={(e) => updateRow(
-                                      idx,
-                                      inputMode === 'cr_league' ? 'totalScore' : 'kills',
-                                      e.target.value
-                                    )}
-                                    className={`w-14 ${inputCls}`}
+                                    value={row.kills}
+                                    onChange={(e) => updateKills(idx, e.target.value)}
+                                    className={inputCls}
+                                    placeholder="0"
                                   />
                                 ) : (
-                                  <span className="font-mono text-white">{killsVal === '' ? '—' : killsVal}</span>
+                                  <span className="font-mono text-white">{row.kills === '' ? '—' : row.kills}</span>
                                 )}
                               </td>
-                              <td className="px-2 py-1.5">
-                                {inputMode === 'cr_league' ? (
-                                  <span className="font-mono text-slate-500">—</span>
-                                ) : editable ? (
-                                  <input
-                                    type="number"
-                                    value={row.placementPoints}
-                                    onChange={(e) => updateRow(idx, 'placementPoints', e.target.value)}
-                                    className={`w-14 ${inputCls}`}
-                                  />
-                                ) : (
-                                  <span className="font-mono text-slate-300">{row.placementPoints}</span>
-                                )}
-                              </td>
-                              <td className="px-2 py-1.5 text-right font-mono text-sm font-bold text-emerald">
-                                {liveTotal}
-                              </td>
+                              <td className="px-2 py-1.5 font-mono text-slate-300">{pp}</td>
+                              <td className="px-2 py-1.5 text-right font-mono text-sm font-bold text-emerald">{liveTotal}</td>
                             </tr>
                           );
                         })}
@@ -528,12 +471,7 @@ export default function ManualInputModal({
                     Next <CaretRight size={16} />
                   </Button>
                 ) : (
-                  <Button
-                    variant="success"
-                    onClick={handleSubmit}
-                    loading={submitting}
-                    disabled={filledRows.length === 0}
-                  >
+                  <Button variant="success" onClick={handleSubmit} loading={submitting} disabled={filledRows.length === 0}>
                     Apply to Leaderboard
                   </Button>
                 )}

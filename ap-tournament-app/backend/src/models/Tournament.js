@@ -22,6 +22,13 @@ const tournamentSchema = new mongoose.Schema(
       booyahBonus: { type: Number, default: 5 },
     },
     leaderboardSubtitle: { type: String, default: 'KLASEMEN GRAND FINAL' },
+    certificateTemplate: String,
+    certificatePlaceholders: {
+      teamName: { x: { type: Number, default: 50 }, y: { type: Number, default: 48 } },
+      rank: { x: { type: Number, default: 50 }, y: { type: Number, default: 38 } },
+      tournamentName: { x: { type: Number, default: 50 }, y: { type: Number, default: 58 } },
+      date: { x: { type: Number, default: 50 }, y: { type: Number, default: 68 } },
+    },
     teams: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Team' }],
   },
   { timestamps: true }

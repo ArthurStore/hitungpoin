@@ -66,8 +66,13 @@ export default function OfficialLeaderboard({ tournament, standings, matches = [
               </p>
             </div>
 
-            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-black/50 p-1.5 ring-2 ring-orange-500/30">
-              <img src="/free-fire-logo.svg" alt="Free Fire" className="h-full w-full object-contain" crossOrigin="anonymous" />
+            <div className="flex h-14 w-20 shrink-0 items-center justify-center rounded-xl bg-black/40 p-1 ring-2 ring-orange-500/25">
+              <img
+                src="/free-fire-logo.png"
+                alt="Free Fire"
+                className="h-full w-full object-contain"
+                crossOrigin="anonymous"
+              />
             </div>
           </div>
 
