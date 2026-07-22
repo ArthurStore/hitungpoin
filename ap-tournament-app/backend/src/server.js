@@ -1,15 +1,21 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { config } from './config/env.js';
 import { connectDatabase } from './config/database.js';
+import { UPLOADS_DIR } from './config/upload.js';
 import authRoutes from './routes/authRoutes.js';
 import tournamentRoutes from './routes/tournamentRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
 import publicRoutes from './routes/publicRoutes.js';
+import ocrRoutes from './routes/ocrRoutes.js';
+import uploadRoutes from './routes/uploadRoutes.js';
 
 dotenv.config();
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 
 const corsOrigins = process.env.CORS_ORIGINS
@@ -18,15 +24,18 @@ const corsOrigins = process.env.CORS_ORIGINS
 
 app.use(cors({ origin: corsOrigins, credentials: true }));
 app.use(express.json({ limit: '10mb' }));
+app.use('/uploads', express.static(UPLOADS_DIR));
 
 app.get('/api/health', (_req, res) => {
-  res.json({ status: 'ok', app: 'AP (Arthur Points)', version: '2.0.0' });
+  res.json({ status: 'ok', app: 'AP (Arthur Points)', version: '2.1.0' });
 });
 
 app.use('/api/auth', authRoutes);
 app.use('/api/tournaments', tournamentRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/public', publicRoutes);
+app.use('/api/ocr', ocrRoutes);
+app.use('/api/upload', uploadRoutes);
 
 app.use((err, _req, res, _next) => {
   console.error(err);

@@ -21,6 +21,7 @@ const tournamentSchema = new mongoose.Schema(
       killPoint: { type: Number, default: 1 },
       booyahBonus: { type: Number, default: 5 },
     },
+    leaderboardSubtitle: { type: String, default: 'KLASEMEN GRAND FINAL' },
     teams: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Team' }],
   },
   { timestamps: true }

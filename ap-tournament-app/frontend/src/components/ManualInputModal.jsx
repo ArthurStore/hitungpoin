@@ -56,7 +56,8 @@ export default function ManualInputModal({
   };
 
   const handleMouseDown = (e) => {
-    if (zoom <= 1) return;
+    if (!imageUrl) return;
+    e.preventDefault();
     setDragging(true);
     setDragStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
   };
@@ -84,7 +85,7 @@ export default function ManualInputModal({
   const filledRows = rows.filter((r) => r.teamId || r.teamName);
 
   return (
-    <div className={`fixed inset-0 z-[200] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm ${fullscreen ? '' : ''}`}>
+    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
       <div className={`flex flex-col overflow-hidden rounded-2xl border border-white/10 bg-slate-900 shadow-2xl ${
         fullscreen ? 'h-[100dvh] w-full max-w-none' : 'h-[90dvh] w-full max-w-6xl'
       }`}>
@@ -96,7 +97,6 @@ export default function ManualInputModal({
         </div>
 
         <div className="flex flex-1 flex-col overflow-hidden lg:flex-row">
-          {/* Image panel */}
           <div className="flex flex-col border-b border-white/10 lg:w-1/2 lg:border-b-0 lg:border-r">
             <div className="flex items-center gap-2 border-b border-white/5 px-3 py-2">
               <button type="button" onClick={() => setZoom((z) => Math.min(4, z + 0.25))} className="rounded p-1.5 text-slate-400 hover:bg-white/5 hover:text-white" title="Zoom In">
@@ -111,18 +111,22 @@ export default function ManualInputModal({
               <button type="button" onClick={() => setFullscreen((f) => !f)} className="rounded p-1.5 text-slate-400 hover:bg-white/5 hover:text-white" title="Fullscreen">
                 <ArrowsOut size={18} />
               </button>
-              <span className="ml-auto font-mono text-xs text-slate-500">{Math.round(zoom * 100)}%</span>
+              <span className="ml-auto font-mono text-xs text-slate-500">{Math.round(zoom * 100)}% · Drag to pan</span>
             </div>
-            <div ref={imgWrapRef} className="relative flex-1 overflow-hidden bg-black/40" onMouseDown={handleMouseDown}>
+            <div
+              ref={imgWrapRef}
+              className="relative flex-1 overflow-hidden bg-black/40"
+              onMouseDown={handleMouseDown}
+              style={{ cursor: imageUrl ? (dragging ? 'grabbing' : 'grab') : 'default' }}
+            >
               {imageUrl ? (
                 <img
                   src={imageUrl}
                   alt="Scoreboard reference"
                   draggable={false}
-                  className="absolute left-1/2 top-1/2 max-h-none max-w-none select-none"
+                  className="absolute left-1/2 top-1/2 max-h-none max-w-none select-none pointer-events-none"
                   style={{
                     transform: `translate(calc(-50% + ${pan.x}px), calc(-50% + ${pan.y}px)) scale(${zoom})`,
-                    cursor: zoom > 1 ? (dragging ? 'grabbing' : 'grab') : 'default',
                   }}
                 />
               ) : (
@@ -131,7 +135,6 @@ export default function ManualInputModal({
             </div>
           </div>
 
-          {/* Form panel */}
           <div className="flex flex-1 flex-col overflow-hidden lg:w-1/2">
             <div className="flex-1 overflow-y-auto p-4">
               <p className="mb-3 text-xs text-slate-500">
@@ -148,7 +151,7 @@ export default function ManualInputModal({
                       )
                     : 0;
 
-                  const rankBadge = row.placement === 1 ? 'BOOYAH' : `#${row.placement}`;
+                  const rankBadge = row.placement === 1 ? 'BOOYAH 🔥' : `#${row.placement}`;
 
                   return (
                     <div key={idx} className={`flex flex-wrap items-center gap-2 rounded-lg px-3 py-2 ${
@@ -156,7 +159,7 @@ export default function ManualInputModal({
                       row.placement === 2 ? 'bg-slate-400/10' :
                       row.placement === 3 ? 'bg-amber-900/20' : 'bg-slate-800/40'
                     }`}>
-                      <span className={`w-14 shrink-0 text-center text-xs font-bold ${
+                      <span className={`w-16 shrink-0 text-center text-xs font-bold ${
                         row.placement === 1 ? 'text-gold' : row.placement <= 3 ? 'text-slate-300' : 'text-slate-500'
                       }`}>{rankBadge}</span>
                       <select

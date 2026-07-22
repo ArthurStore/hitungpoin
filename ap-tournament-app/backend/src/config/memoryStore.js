@@ -69,6 +69,7 @@ export const memoryStore = {
         killPoint: 1,
         booyahBonus: 5,
       },
+      leaderboardSubtitle: 'KLASEMEN GRAND FINAL',
       ...data,
       status: data.status || 'active',
       createdAt: new Date().toISOString(),
@@ -87,6 +88,44 @@ export const memoryStore = {
     if (idx === -1) return null;
     store.tournaments[idx] = { ...store.tournaments[idx], ...data, updatedAt: new Date().toISOString() };
     return store.tournaments[idx];
+  },
+
+  syncMatches: (tournamentId, totalMatches, matchConfigs = []) => {
+    store.matches = store.matches.filter(
+      (m) => m.tournamentId !== tournamentId || m.matchNumber <= totalMatches
+    );
+    for (let n = 1; n <= totalMatches; n += 1) {
+      const cfg = matchConfigs.find((c) => c.matchNumber === n) || { matchNumber: n, map: 'Bermuda' };
+      const existing = store.matches.find((m) => m.tournamentId === tournamentId && m.matchNumber === n);
+      if (!existing) {
+        store.matches.push({
+          _id: uuidv4(),
+          tournamentId,
+          matchNumber: n,
+          map: cfg.map,
+          status: 'pending',
+          results: [],
+        });
+      } else {
+        existing.map = cfg.map;
+      }
+    }
+    return store.matches.filter((m) => m.tournamentId === tournamentId);
+  },
+
+  resetAllTournaments: () => {
+    const count = store.tournaments.length;
+    store.tournaments = [];
+    store.teams = [];
+    store.matches = [];
+    return count;
+  },
+
+  resetMediaStorage: () => {
+    store.tournaments.forEach((t) => {
+      if (t.logo?.startsWith('/uploads/')) t.logo = '';
+    });
+    return 0;
   },
 
   deleteTournament: (id) => {

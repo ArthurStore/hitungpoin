@@ -43,7 +43,7 @@ export default function LeaderboardTab() {
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h2 className="font-bold text-white">Live Leaderboard</h2>
-          <p className="text-xs text-slate-500">Official Free Fire tournament style</p>
+          <p className="text-xs text-slate-500">Format 9:16 — siap untuk Instagram Story / WhatsApp Status</p>
         </div>
         <Button variant="gold" onClick={handleExport} loading={exporting}>
           <Download size={16} /> Download Leaderboard PNG

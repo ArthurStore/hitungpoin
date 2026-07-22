@@ -2,10 +2,12 @@ import html2canvas from 'html2canvas';
 
 export async function exportElementAsPNG(element, filename) {
   const canvas = await html2canvas(element, {
-    backgroundColor: null,
-    scale: 2,
+    backgroundColor: '#0f172a',
+    scale: 3,
     useCORS: true,
     logging: false,
+    width: element.offsetWidth,
+    height: element.offsetHeight,
   });
   const link = document.createElement('a');
   link.download = filename;

@@ -1,6 +1,7 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
+import APLogo from './components/APLogo';
 import Login from './views/Auth/Login';
 import Register from './views/Auth/Register';
 import Dashboard from './views/Dashboard';
@@ -17,9 +18,8 @@ function AppLayout({ children }) {
   return (
     <div className="min-h-[100dvh] bg-slate-950">
       <header className="border-b border-white/5 bg-slate-950/80 px-4 py-3 backdrop-blur-xl">
-        <div className="mx-auto flex max-w-7xl items-center gap-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald/20 text-xs font-bold text-emerald">AP</div>
-          <span className="font-bold text-white">Arthur Points</span>
+        <div className="mx-auto flex max-w-7xl items-center">
+          <APLogo size="sm" />
         </div>
       </header>
       <main className="mx-auto max-w-7xl px-4 py-6">{children}</main>
@@ -36,7 +36,8 @@ export default function App() {
         <Route path="/live/:tournamentId" element={<LiveStandings />} />
 
         <Route path="/" element={<ProtectedRoute><AppLayout><Dashboard /></AppLayout></ProtectedRoute>} />
-        <Route path="/admin" element={<ProtectedRoute><AppLayout><AdminPanel /></AppLayout></ProtectedRoute>} />
+
+        <Route path="/admin" element={<AppLayout><AdminPanel /></AppLayout>} />
 
         <Route path="/tournament/new" element={
           <ProtectedRoute><AppLayout><CreateTournamentPage /></AppLayout></ProtectedRoute>

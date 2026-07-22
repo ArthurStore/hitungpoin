@@ -1,9 +1,31 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
-import { Shield, ArrowLeft } from '@phosphor-icons/react';
+import { Shield, ArrowLeft, Warning, Trash, HardDrives } from '@phosphor-icons/react';
 import { api } from '../../utils/api';
 import Button from '../../components/Button';
+import Toast from '../../components/Toast';
+
+function ConfirmModal({ open, title, message, onConfirm, onCancel, loading, danger }) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+      <div className="w-full max-w-md rounded-2xl border border-white/10 bg-slate-900 p-6 shadow-2xl">
+        <div className="flex items-start gap-3">
+          <Warning size={28} className={`shrink-0 ${danger ? 'text-crimson' : 'text-gold'}`} weight="fill" />
+          <div>
+            <h3 className="font-bold text-white">{title}</h3>
+            <p className="mt-2 text-sm text-slate-400">{message}</p>
+          </div>
+        </div>
+        <div className="mt-6 flex justify-end gap-2">
+          <Button variant="ghost" onClick={onCancel} disabled={loading}>Cancel</Button>
+          <Button variant="danger" onClick={onConfirm} loading={loading}>Confirm</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function AdminPanel() {
   const navigate = useNavigate();
@@ -12,6 +34,9 @@ export default function AdminPanel() {
   const [metrics, setMetrics] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [resetLoading, setResetLoading] = useState('');
+  const [confirmAction, setConfirmAction] = useState(null);
+  const [toast, setToast] = useState({ message: '', type: 'info' });
 
   const verifyPin = async () => {
     setError('');
@@ -28,24 +53,44 @@ export default function AdminPanel() {
     }
   };
 
+  const handleReset = async (type) => {
+    setResetLoading(type);
+    try {
+      if (type === 'tournaments') {
+        const res = await api.resetAllTournaments(pin);
+        setToast({ message: res.message, type: 'success' });
+        const data = await api.getAdminMetrics(pin);
+        setMetrics(data);
+      } else {
+        const res = await api.resetMediaStorage(pin);
+        setToast({ message: res.message, type: 'success' });
+      }
+    } catch (err) {
+      setToast({ message: err.message, type: 'error' });
+    } finally {
+      setResetLoading('');
+      setConfirmAction(null);
+    }
+  };
+
   if (!verified) {
     return (
       <div className="mx-auto max-w-sm space-y-6 pt-12">
         <Button variant="ghost" onClick={() => navigate('/')}><ArrowLeft size={16} /> Back</Button>
         <div className="glass-panel rounded-2xl p-8 text-center">
           <Shield size={40} className="mx-auto text-gold" weight="duotone" />
-          <h1 className="mt-4 text-xl font-bold text-white">Super Admin Panel</h1>
-          <p className="mt-1 text-sm text-slate-400">Enter PIN to access system metrics</p>
+          <h1 className="mt-4 font-display text-xl font-bold text-white">Super Admin Panel</h1>
+          <p className="mt-1 text-sm text-slate-400">Masukkan PIN untuk akses sistem (default: 1234)</p>
           <input
             type="password"
             value={pin}
             onChange={(e) => setPin(e.target.value)}
             placeholder="PIN Code"
-            className="mt-6 w-full rounded-xl border border-white/10 bg-slate-800 px-4 py-3 text-center font-mono text-white focus:outline-none"
+            className="mt-6 w-full rounded-xl border border-white/10 bg-slate-800 px-4 py-3 text-center font-mono text-white focus:outline-none focus:ring-2 focus:ring-emerald/40"
             onKeyDown={(e) => e.key === 'Enter' && verifyPin()}
           />
           {error && <p className="mt-2 text-sm text-crimson">{error}</p>}
-          <Button variant="gold" className="mt-4 w-full" onClick={verifyPin} loading={loading}>Verify PIN</Button>
+          <Button variant="secondary" className="mt-4 w-full" onClick={verifyPin} loading={loading}>Verify PIN</Button>
         </div>
       </div>
     );
@@ -60,9 +105,21 @@ export default function AdminPanel() {
 
   return (
     <div className="space-y-8">
+      <Toast message={toast.message} type={toast.type} onClose={() => setToast({ message: '', type: 'info' })} />
+
+      <ConfirmModal
+        open={!!confirmAction}
+        title={confirmAction?.title}
+        message={confirmAction?.message}
+        danger
+        loading={!!resetLoading}
+        onCancel={() => setConfirmAction(null)}
+        onConfirm={() => handleReset(confirmAction.type)}
+      />
+
       <div className="flex items-center gap-4">
         <Button variant="ghost" onClick={() => navigate('/')}><ArrowLeft size={16} /></Button>
-        <h1 className="text-2xl font-bold text-white">Super Admin Dashboard</h1>
+        <h1 className="font-display text-2xl font-bold text-white">Super Admin Dashboard</h1>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -72,6 +129,35 @@ export default function AdminPanel() {
             <p className="mt-1 font-mono text-2xl font-bold text-white">{c.value ?? 0}</p>
           </div>
         ))}
+      </div>
+
+      <div className="glass-panel rounded-2xl p-6">
+        <h2 className="mb-2 font-bold text-white">System Reset</h2>
+        <p className="mb-4 text-sm text-slate-400">Tindakan destruktif — memerlukan konfirmasi.</p>
+        <div className="flex flex-wrap gap-3">
+          <Button
+            variant="danger"
+            onClick={() => setConfirmAction({
+              type: 'tournaments',
+              title: 'Reset All Tournaments?',
+              message: 'Semua turnamen, tim, dan match akan dihapus permanen. User accounts tetap ada.',
+            })}
+            loading={resetLoading === 'tournaments'}
+          >
+            <Trash size={16} /> Reset All Tournaments
+          </Button>
+          <Button
+            variant="danger"
+            onClick={() => setConfirmAction({
+              type: 'media',
+              title: 'Reset Media Storage?',
+              message: 'Semua file logo/media di server akan dihapus. Referensi logo di DB akan dikosongkan.',
+            })}
+            loading={resetLoading === 'media'}
+          >
+            <HardDrives size={16} /> Reset Media Storage
+          </Button>
+        </div>
       </div>
 
       {metrics?.chartData?.length > 0 && (
@@ -87,7 +173,7 @@ export default function AdminPanel() {
                 <Legend />
                 <Line type="monotone" dataKey="users" stroke="#10B981" strokeWidth={2} />
                 <Line type="monotone" dataKey="scans" stroke="#F59E0B" strokeWidth={2} />
-                <Line type="monotone" dataKey="tournaments" stroke="#EF4444" strokeWidth={2} />
+                <Line type="monotone" dataKey="tournaments" stroke="#06B6D4" strokeWidth={2} />
               </LineChart>
             </ResponsiveContainer>
           </div>

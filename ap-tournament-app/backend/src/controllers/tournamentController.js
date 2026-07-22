@@ -94,14 +94,45 @@ export async function createTournament(req, res) {
 export async function updateTournament(req, res) {
   try {
     const { id } = req.params;
+    const { totalMatches, matchConfigs, ...rest } = req.body;
+
     if (isMemoryStore()) {
-      const updated = memoryStore.updateTournament(id, req.body);
-      if (!updated) return res.status(404).json({ error: 'Not found' });
-      return res.json(updated);
+      const existing = memoryStore.getTournament(id);
+      if (!existing) return res.status(404).json({ error: 'Not found' });
+
+      const nextTotal = totalMatches ?? existing.totalMatches;
+      const configs = buildMatchConfigs(nextTotal, matchConfigs || existing.matchConfigs);
+      const updated = memoryStore.updateTournament(id, {
+        ...rest,
+        totalMatches: nextTotal,
+        matchConfigs: configs,
+      });
+      const matches = memoryStore.syncMatches(id, nextTotal, configs);
+      return res.json({ ...updated, matches });
     }
-    const tournament = await Tournament.findByIdAndUpdate(id, req.body, { new: true });
-    if (!tournament) return res.status(404).json({ error: 'Not found' });
-    res.json(tournament);
+
+    const existing = await Tournament.findById(id);
+    if (!existing) return res.status(404).json({ error: 'Not found' });
+
+    const nextTotal = totalMatches ?? existing.totalMatches;
+    const configs = buildMatchConfigs(nextTotal, matchConfigs || existing.matchConfigs);
+
+    const tournament = await Tournament.findByIdAndUpdate(
+      id,
+      { ...rest, totalMatches: nextTotal, matchConfigs: configs },
+      { new: true }
+    );
+
+    await Match.deleteMany({ tournamentId: id, matchNumber: { $gt: nextTotal } });
+    for (const cfg of configs) {
+      await Match.findOneAndUpdate(
+        { tournamentId: id, matchNumber: cfg.matchNumber },
+        { $setOnInsert: { tournamentId: id, matchNumber: cfg.matchNumber, status: 'pending', results: [] }, $set: { map: cfg.map } },
+        { upsert: true, new: true }
+      );
+    }
+    const matches = await Match.find({ tournamentId: id }).sort({ matchNumber: 1 });
+    res.json({ ...tournament.toObject(), matches });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

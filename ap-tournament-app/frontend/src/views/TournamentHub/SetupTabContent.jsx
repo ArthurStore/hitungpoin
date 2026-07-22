@@ -27,6 +27,7 @@ export default function SetupTabContent({ isNew, tournament, refresh }) {
       : buildMatchConfigs(tournament?.totalMatches || 6),
     rosterText: '',
     scoringRules: tournament?.scoringRules || buildDefaultScoringRules(),
+    leaderboardSubtitle: tournament?.leaderboardSubtitle || 'KLASEMEN GRAND FINAL',
   });
 
   const update = (k, v) => setForm((p) => ({ ...p, [k]: v }));
@@ -81,6 +82,18 @@ export default function SetupTabContent({ isNew, tournament, refresh }) {
           <label className="mb-2 block text-sm text-slate-300">Tournament Name</label>
           <input value={form.name} onChange={(e) => update('name', e.target.value)} disabled={saving}
             className="w-full rounded-xl border border-white/10 bg-slate-800/50 px-4 py-3 text-white focus:outline-none disabled:opacity-60" />
+        </div>
+
+        <div>
+          <label className="mb-2 block text-sm text-slate-300">Leaderboard Subtitle</label>
+          <input
+            value={form.leaderboardSubtitle}
+            onChange={(e) => update('leaderboardSubtitle', e.target.value)}
+            disabled={saving}
+            placeholder="KLASEMEN GRAND FINAL"
+            className="w-full rounded-xl border border-white/10 bg-slate-800/50 px-4 py-3 font-display text-white focus:outline-none disabled:opacity-60"
+          />
+          <p className="mt-1 text-xs text-slate-500">Shown on 9:16 poster export (e.g. DAY 1 - QUALIFIER)</p>
         </div>
 
         <div>

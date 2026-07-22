@@ -14,8 +14,8 @@ import { calcMatchPoints, getScoringRules } from '../../utils/pointsCalc';
 import { api } from '../../utils/api';
 
 function openManualFallback(setToast, setManualOpen, addLog, reason) {
-  setToast({ message: reason || 'OCR failed or slow, switching to Manual Input', type: 'error' });
-  addLog('Fallback: Manual Input modal opened.');
+  setToast({ message: reason || 'OCR gagal atau timeout — beralih ke Manual Input', type: 'error' });
+  addLog('Fail-safe: Manual Input modal opened.');
   setManualOpen(true);
 }
 
@@ -67,7 +67,7 @@ export default function MatchInputTab() {
       addLog('Pre-processing screenshot...');
 
       const { primary } = await cropForMode(files[0], inputMode);
-      addLog('Starting OCR (single optimized crop)...');
+      addLog('Starting hybrid OCR (server-first, 60s timeout)...');
 
       const result = await scanWithLogs(
         primary,
@@ -75,8 +75,8 @@ export default function MatchInputTab() {
         (pct) => setProgress(pct)
       );
 
-      if (!result.success) {
-        openManualFallback(setToast, setManualOpen, addLog, 'OCR failed or slow, switching to Manual Input');
+      if (!result.success || !result.text?.trim()) {
+        openManualFallback(setToast, setManualOpen, addLog, result.error || 'OCR gagal — gunakan Manual Input');
         return;
       }
 
@@ -103,8 +103,7 @@ export default function MatchInputTab() {
         setManualOpen(true);
       }
 
-      await api.recordOcrScan(1);
-      setToast({ message: 'OCR complete! Review results in Manual Input.', type: 'success' });
+      setToast({ message: 'OCR selesai! Review hasil di Manual Input.', type: 'success' });
       setProgress(100);
     } catch (err) {
       addLog(`ERROR: ${err.message}`);
@@ -183,7 +182,7 @@ export default function MatchInputTab() {
           <label className="mb-2 block text-sm text-slate-300">Input Mode</label>
           <div className="flex gap-2">
             <button type="button" onClick={() => setInputMode('cr_biasa')}
-              className={`flex-1 rounded-xl px-4 py-3 text-left text-sm ${inputMode === 'cr_biasa' ? 'bg-crimson/20 text-crimson ring-1 ring-crimson/30' : 'bg-slate-800 text-slate-400'}`}>
+              className={`flex-1 rounded-xl px-4 py-3 text-left text-sm ${inputMode === 'cr_biasa' ? 'bg-cyan-600/20 text-cyan-400 ring-1 ring-cyan-500/30' : 'bg-slate-800 text-slate-400'}`}>
               <p className="font-semibold">CR Biasa</p>
               <p className="text-xs opacity-70">Full scoreboard, rep verification</p>
             </button>

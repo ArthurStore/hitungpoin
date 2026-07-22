@@ -1,6 +1,8 @@
 import Tesseract from 'tesseract.js';
+import { api } from './api.js';
 
-const RECOGNIZE_TIMEOUT_MS = 25000;
+const CLIENT_OCR_TIMEOUT_MS = 20000;
+const SERVER_OCR_TIMEOUT_MS = 60000;
 
 let workerInstance = null;
 
@@ -25,7 +27,7 @@ export async function terminateWorker() {
 async function getWorker(onLog) {
   if (workerInstance) return workerInstance;
 
-  onLog?.('Initializing Tesseract worker...', 0);
+  onLog?.('Initializing client Tesseract worker (fallback)...', 0);
 
   workerInstance = await Tesseract.createWorker('eng', 1, {
     logger: (m) => {
@@ -42,25 +44,49 @@ async function getWorker(onLog) {
     tessedit_pageseg_mode: Tesseract.PSM.SINGLE_BLOCK,
   });
 
-  onLog?.('Tesseract engine ready.', 100);
+  onLog?.('Client OCR engine ready.', 100);
   return workerInstance;
 }
 
-function withTimeout(promise, ms, onLog) {
+function withTimeout(promise, ms, onLog, label = 'Scan') {
   return Promise.race([
     promise,
     new Promise((_, reject) => {
       setTimeout(() => {
-        onLog?.(`ERROR: Scan timed out after ${ms / 1000}s`, 0);
-        reject(new Error(`OCR timeout: scan exceeded ${ms / 1000} seconds`));
+        onLog?.(`ERROR: ${label} timed out after ${ms / 1000}s`, 0);
+        reject(new Error(`${label} timeout: exceeded ${ms / 1000} seconds`));
       }, ms);
     }),
   ]);
 }
 
-export async function scanWithLogs(dataUrl, onLog, onProgress) {
+async function dataUrlToBlob(dataUrl) {
+  const res = await fetch(dataUrl);
+  return res.blob();
+}
+
+export async function scanServerOcr(dataUrl, onLog, onProgress) {
+  onLog?.('Sending image to server OCR (Sharp + Tesseract)...', 5);
+  onProgress?.(5);
   try {
-    onLog?.('Starting OCR scan...', 0);
+    const blob = await dataUrlToBlob(dataUrl);
+    const result = await api.scanOcr(blob, SERVER_OCR_TIMEOUT_MS);
+    if (result.success) {
+      onLog?.('Server OCR completed!', 100);
+      onProgress?.(100);
+    } else {
+      onLog?.(`Server OCR failed: ${result.error}`, 0);
+    }
+    return result;
+  } catch (err) {
+    onLog?.(`Server OCR error: ${err.message}`, 0);
+    return { success: false, error: err.message, text: '' };
+  }
+}
+
+export async function scanClientOcr(dataUrl, onLog, onProgress) {
+  try {
+    onLog?.('Fallback: client-side OCR scan...', 0);
     const worker = await getWorker(onLog);
 
     const recognizePromise = worker.recognize(dataUrl, {}, (m) => {
@@ -71,28 +97,34 @@ export async function scanWithLogs(dataUrl, onLog, onProgress) {
       }
     });
 
-    const result = await withTimeout(recognizePromise, RECOGNIZE_TIMEOUT_MS, onLog);
-    onLog?.('Completed!', 100);
+    const result = await withTimeout(recognizePromise, CLIENT_OCR_TIMEOUT_MS, onLog, 'Client OCR');
+    onLog?.('Client OCR completed!', 100);
     onProgress?.(100);
-    return { success: true, text: result.data.text };
+    return { success: true, text: result.data.text, engine: 'client-tesseract' };
   } catch (err) {
-    onLog?.(`ERROR: ${err.message}`, 0);
+    onLog?.(`Client OCR error: ${err.message}`, 0);
     return { success: false, error: err.message, text: '' };
   }
 }
 
-export async function scanMultipleWithLogs(dataUrls, onLog, onProgress) {
-  const results = [];
-  for (let i = 0; i < dataUrls.length; i++) {
-    onLog?.(`--- Processing image ${i + 1}/${dataUrls.length} ---`, 0);
-    const baseProgress = (i / dataUrls.length) * 100;
-    const res = await scanWithLogs(dataUrls[i], onLog, (pct) => {
-      onProgress?.(Math.round(baseProgress + (pct / dataUrls.length)));
-    });
-    results.push({ index: i, ...res });
-    if (!res.success) break;
+/** Hybrid pipeline: server first, client fallback */
+export async function scanWithLogs(dataUrl, onLog, onProgress) {
+  onLog?.('Starting hybrid OCR pipeline...', 0);
+
+  const serverResult = await scanServerOcr(dataUrl, onLog, onProgress);
+  if (serverResult.success && serverResult.text?.trim()) {
+    return serverResult;
   }
-  return results;
+
+  onLog?.('Server OCR unavailable, trying client fallback...', 10);
+  const clientResult = await scanClientOcr(dataUrl, onLog, onProgress);
+  if (clientResult.success) return clientResult;
+
+  return {
+    success: false,
+    error: serverResult.error || clientResult.error || 'OCR failed',
+    text: '',
+  };
 }
 
 /** Mode 1: CR Biasa - parse kill counts per team from full scoreboard */

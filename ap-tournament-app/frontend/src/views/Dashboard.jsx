@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Plus, Trophy, SignOut, LinkSimple } from '@phosphor-icons/react';
 import { useAuth } from '../context/AuthContext';
-import { api } from '../utils/api';
+import { api, resolveAssetUrl } from '../utils/api';
 import Button from '../components/Button';
 
 export default function Dashboard() {
@@ -52,7 +52,7 @@ export default function Dashboard() {
                     {t.status}
                   </span>
                 </div>
-                {t.logo && <img src={t.logo} alt="" className="h-10 w-10 rounded-lg object-cover" />}
+                {t.logo && <img src={resolveAssetUrl(t.logo)} alt="" className="h-10 w-10 rounded-lg object-cover" />}
               </div>
               <div className="mt-4 flex gap-2">
                 <Button variant="primary" size="sm" className="flex-1" onClick={() => navigate(`/tournament/${t._id}`)}>
