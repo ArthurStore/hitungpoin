@@ -26,13 +26,22 @@ app.use(cors({ origin: corsOrigins, credentials: true }));
 app.use(express.json({ limit: '10mb' }));
 app.use('/uploads', express.static(UPLOADS_DIR));
 
+app.get('/', (_req, res) => {
+  res.json({
+    app: 'AP (Arthur Points) API',
+    version: '2.2.0',
+    health: '/api/health',
+    admin: 'POST /api/admin/verify-pin (header: X-Admin-Pin)',
+  });
+});
+
 app.get('/api/health', (_req, res) => {
-  res.json({ status: 'ok', app: 'AP (Arthur Points)', version: '2.1.0' });
+  res.json({ status: 'ok', app: 'AP (Arthur Points)', version: '2.2.0' });
 });
 
 app.use('/api/auth', authRoutes);
-app.use('/api/tournaments', tournamentRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/tournaments', tournamentRoutes);
 app.use('/api/public', publicRoutes);
 app.use('/api/ocr', ocrRoutes);
 app.use('/api/upload', uploadRoutes);

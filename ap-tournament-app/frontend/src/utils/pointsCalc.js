@@ -84,6 +84,32 @@ export function calcSingleRowPoints(placement, kills, mode, scoringRules) {
   return row?.totalPoints ?? 0;
 }
 
+/** Default placement points for a rank (editable override lives in form rows). */
+export function getDefaultPlacementPoints(placement, scoringRules = {}) {
+  const map = { ...DEFAULT_PLACEMENT_POINTS, ...scoringRules.placementPoints };
+  return map[placement] ?? 0;
+}
+
+/**
+ * Live total: (kills * killPt) + placementPts
+ * If placementPts omitted, uses scoring table + booyah bonus for #1.
+ */
+export function calcLiveTotal({ placement, kills, placementPoints, mode, scoringRules }) {
+  if (mode === 'cr_league') {
+    return parseInt(kills ?? placementPoints ?? 0, 10) || 0;
+  }
+  const killPt = scoringRules?.killPoint ?? DEFAULT_KILL_POINT;
+  const k = parseInt(kills, 10) || 0;
+  let pp = placementPoints;
+  if (pp === '' || pp === null || pp === undefined) {
+    pp = getDefaultPlacementPoints(placement, scoringRules);
+    if (placement === 1) pp += scoringRules?.booyahBonus ?? DEFAULT_BOOYAH_BONUS;
+  } else {
+    pp = parseInt(pp, 10) || 0;
+  }
+  return k * killPt + pp;
+}
+
 export function buildMatchConfigs(totalMatches, existing = []) {
   return Array.from({ length: totalMatches }, (_, i) => ({
     matchNumber: i + 1,

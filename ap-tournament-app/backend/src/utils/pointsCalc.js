@@ -29,18 +29,24 @@ export function calcMatchPoints(results, rules = {}, mode = 'cr_biasa') {
     const placement = Math.min(12, Math.max(1, r.placement || 12));
     const kills = Math.max(0, parseInt(r.kills, 10) || 0);
     const isBooyah = placement === 1;
-    const pp = placementPts[placement] ?? 0;
-    const kp = kills * killPt;
+    const defaultPp = placementPts[placement] ?? 0;
     const bonus = isBooyah ? booyahBonus : 0;
+    const pp = r.placementPoints != null && r.placementPoints !== ''
+      ? parseInt(r.placementPoints, 10) || 0
+      : defaultPp + bonus;
+    const kp = kills * killPt;
+    const total = r.totalPoints != null && !Number.isNaN(Number(r.totalPoints))
+      ? Number(r.totalPoints)
+      : (r.placementPoints != null && r.placementPoints !== '' ? pp + kp : defaultPp + kp + bonus);
 
     return {
       ...r,
       placement,
       kills,
       isBooyah,
-      placementPoints: pp,
+      placementPoints: r.placementPoints != null && r.placementPoints !== '' ? pp : defaultPp,
       killPoints: kp,
-      totalPoints: pp + kp + bonus,
+      totalPoints: total,
       mode: 'cr_biasa',
     };
   });

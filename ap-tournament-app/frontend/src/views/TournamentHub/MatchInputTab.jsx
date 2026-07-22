@@ -8,14 +8,17 @@ import Toast from '../../components/Toast';
 import ManualInputModal from '../../components/ManualInputModal';
 import { cropForMode } from '../../utils/canvasCrop';
 import {
-  scanWithLogs, parseByMode, matchTeamsToRoster, terminateWorker,
+  scanMultiPass, matchTeamsToRoster, terminateWorker,
 } from '../../utils/ocrScanner';
-import { calcMatchPoints, getScoringRules } from '../../utils/pointsCalc';
+import { calcMatchPoints, getScoringRules, getDefaultPlacementPoints } from '../../utils/pointsCalc';
 import { api } from '../../utils/api';
 
-function openManualFallback(setToast, setManualOpen, addLog, reason) {
-  setToast({ message: reason || 'OCR gagal atau timeout — beralih ke Manual Input', type: 'error' });
+const MAX_SCREENSHOTS = 3;
+
+function openManualFallback(setToast, setManualOpen, setStartStep, addLog, reason) {
+  setToast({ message: reason || 'OCR gagal — beralih ke Manual Input', type: 'error' });
   addLog('Fail-safe: Manual Input modal opened.');
+  setStartStep(3);
   setManualOpen(true);
 }
 
@@ -33,7 +36,9 @@ export default function MatchInputTab() {
   const [progress, setProgress] = useState(0);
   const [scanning, setScanning] = useState(false);
   const [verifiedResults, setVerifiedResults] = useState([]);
+  const [nicknames, setNicknames] = useState([]);
   const [manualOpen, setManualOpen] = useState(false);
+  const [startStep, setStartStep] = useState(3);
   const [submitting, setSubmitting] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [toast, setToast] = useState({ message: '', type: 'info' });
@@ -45,10 +50,14 @@ export default function MatchInputTab() {
   }, []);
 
   const handleFiles = (incoming) => {
-    const accepted = Array.from(incoming).slice(0, 2);
+    const accepted = Array.from(incoming).slice(0, MAX_SCREENSHOTS);
+    setPreviews((prev) => {
+      prev.forEach((u) => URL.revokeObjectURL(u));
+      return accepted.map((f) => URL.createObjectURL(f));
+    });
     setFiles(accepted);
-    setPreviews(accepted.map((f) => URL.createObjectURL(f)));
     setVerifiedResults([]);
+    setNicknames([]);
     setLogs([]);
     setProgress(0);
     setManualOpen(false);
@@ -58,56 +67,54 @@ export default function MatchInputTab() {
     if (!files.length) return;
     setScanning(true);
     setVerifiedResults([]);
+    setNicknames([]);
     setLogs([]);
     setProgress(0);
     setManualOpen(false);
 
     try {
       addLog(`Mode: ${inputMode === 'cr_league' ? 'CR League' : 'CR Biasa'}`);
-      addLog('Pre-processing screenshot...');
+      addLog(`Multi-pass OCR: ${files.length} screenshot(s) (max ${MAX_SCREENSHOTS})`);
 
-      const { primary } = await cropForMode(files[0], inputMode);
-      addLog('Starting hybrid OCR (server-first, 60s timeout)...');
+      const dataUrls = [];
+      for (let i = 0; i < files.length; i += 1) {
+        addLog(`Pre-processing screenshot ${i + 1}/${files.length}...`);
+        const { primary } = await cropForMode(files[i], inputMode);
+        dataUrls.push(primary);
+      }
 
-      const result = await scanWithLogs(
-        primary,
+      const result = await scanMultiPass(
+        dataUrls,
+        inputMode,
         (msg) => addLog(msg),
         (pct) => setProgress(pct)
       );
 
-      if (!result.success || !result.text?.trim()) {
-        openManualFallback(setToast, setManualOpen, addLog, result.error || 'OCR gagal — gunakan Manual Input');
+      if (!result.success || !result.entries?.length) {
+        openManualFallback(
+          setToast, setManualOpen, setStartStep, addLog,
+          result.error || 'OCR gagal — gunakan Manual Input'
+        );
         return;
       }
 
-      addLog('Parsing results...');
-      const parsed = parseByMode(result.text, inputMode);
+      const matched = matchTeamsToRoster(result.entries, teams).map((r, i) => ({
+        ...r,
+        id: i,
+        ocrNickname: r.nickname || r.teamName,
+        placementPoints: getDefaultPlacementPoints(r.placement, scoringRules)
+          + (r.placement === 1 ? (scoringRules.booyahBonus || 0) : 0),
+      }));
 
-      if (parsed.length === 0) {
-        openManualFallback(setToast, setManualOpen, addLog, 'No data parsed. Switching to Manual Input');
-        return;
-      }
-
-      addLog(`Parsed ${parsed.length} entries.`);
-
-      if (inputMode === 'cr_league') {
-        const direct = parsed.map((r, i) => ({
-          id: i, teamId: null, teamName: r.teamName,
-          placement: r.placement || r.rank,
-          totalScore: r.totalScore || r.score, kills: 0, matchConfidence: 0,
-        }));
-        setVerifiedResults(matchTeamsToRoster(direct, teams).map((r, i) => ({ ...r, id: i })));
-        setManualOpen(true);
-      } else {
-        setVerifiedResults(matchTeamsToRoster(parsed, teams).map((r, i) => ({ ...r, id: i })));
-        setManualOpen(true);
-      }
-
-      setToast({ message: 'OCR selesai! Review hasil di Manual Input.', type: 'success' });
+      setVerifiedResults(matched);
+      setNicknames(result.nicknames || []);
+      setStartStep(1);
+      setManualOpen(true);
+      setToast({ message: `OCR selesai (${files.length} pass). Verifikasi roster → skor.`, type: 'success' });
       setProgress(100);
     } catch (err) {
       addLog(`ERROR: ${err.message}`);
-      openManualFallback(setToast, setManualOpen, addLog, err.message);
+      openManualFallback(setToast, setManualOpen, setStartStep, addLog, err.message);
     } finally {
       setScanning(false);
     }
@@ -127,9 +134,27 @@ export default function MatchInputTab() {
           placement: parseInt(r.placement, 10),
           kills: parseInt(r.kills, 10) || 0,
           totalScore: parseInt(r.totalScore, 10) || 0,
+          placementPoints: r.placementPoints != null ? parseInt(r.placementPoints, 10) : undefined,
+          totalPoints: r.totalPoints,
         }));
 
-      const scored = calcMatchPoints(payload, inputMode, scoringRules);
+      // Prefer operator-adjusted totals when provided
+      const scored = calcMatchPoints(payload, inputMode, scoringRules).map((row, i) => {
+        const src = payload[i];
+        if (src.placementPoints != null && inputMode !== 'cr_league') {
+          const killPt = scoringRules.killPoint ?? 1;
+          const pp = src.placementPoints;
+          const kp = (src.kills || 0) * killPt;
+          return {
+            ...row,
+            placementPoints: pp,
+            killPoints: kp,
+            totalPoints: src.totalPoints != null ? src.totalPoints : (pp + kp),
+          };
+        }
+        return row;
+      });
+
       await api.submitMatchResults(tournament._id, {
         matchNumber,
         results: scored,
@@ -138,10 +163,11 @@ export default function MatchInputTab() {
       });
       await refresh();
       setFiles([]);
-      setPreviews([]);
+      setPreviews((prev) => { prev.forEach((u) => URL.revokeObjectURL(u)); return []; });
       setVerifiedResults([]);
+      setNicknames([]);
       setManualOpen(false);
-      setToast({ message: 'Match results saved!', type: 'success' });
+      setToast({ message: 'Match results saved ke leaderboard!', type: 'success' });
     } catch (err) {
       setToast({ message: err.message, type: 'error' });
     } finally {
@@ -153,9 +179,12 @@ export default function MatchInputTab() {
     ? verifiedResults.map((r) => ({
         placement: r.placement,
         teamId: r.teamId || '',
-        teamName: r.teamName,
+        teamName: r.matchedTeamName || r.teamName,
+        ocrNickname: r.ocrNickname || r.nickname || r.teamName,
         kills: r.kills ?? '',
         totalScore: r.totalScore ?? '',
+        placementPoints: r.placementPoints,
+        nickname: r.nickname || r.teamName,
       }))
     : undefined;
 
@@ -166,11 +195,13 @@ export default function MatchInputTab() {
       <ManualInputModal
         open={manualOpen}
         onClose={() => setManualOpen(false)}
-        imageUrl={previews[0]}
+        imageUrls={previews}
         teams={teams}
         inputMode={inputMode}
         tournament={tournament}
         initialRows={manualInitialRows}
+        nicknames={nicknames}
+        startStep={startStep}
         onSubmit={applyResults}
         submitting={submitting}
       />
@@ -184,12 +215,12 @@ export default function MatchInputTab() {
             <button type="button" onClick={() => setInputMode('cr_biasa')}
               className={`flex-1 rounded-xl px-4 py-3 text-left text-sm ${inputMode === 'cr_biasa' ? 'bg-cyan-600/20 text-cyan-400 ring-1 ring-cyan-500/30' : 'bg-slate-800 text-slate-400'}`}>
               <p className="font-semibold">CR Biasa</p>
-              <p className="text-xs opacity-70">Full scoreboard, rep verification</p>
+              <p className="text-xs opacity-70">Full scoreboard / match history</p>
             </button>
             <button type="button" onClick={() => setInputMode('cr_league')}
               className={`flex-1 rounded-xl px-4 py-3 text-left text-sm ${inputMode === 'cr_league' ? 'bg-emerald/20 text-emerald ring-1 ring-emerald/30' : 'bg-slate-800 text-slate-400'}`}>
               <p className="font-semibold">CR League / Ranklist</p>
-              <p className="text-xs opacity-70">Rank | Team | Score - Langsung Jeder</p>
+              <p className="text-xs opacity-70">Rank | Team | Score</p>
             </button>
           </div>
         </div>
@@ -215,26 +246,29 @@ export default function MatchInputTab() {
           className={`glass-panel flex min-h-[260px] flex-col items-center justify-center rounded-2xl border-2 border-dashed p-6 ${dragOver ? 'border-emerald/50' : 'border-white/10'}`}
         >
           <UploadSimple size={36} className="text-slate-500" />
-          <p className="mt-3 text-sm font-medium text-white">Drag & drop scoreboard screenshot</p>
-          <p className="text-xs text-slate-500">Max 2 images | 16:9 widescreen</p>
+          <p className="mt-3 text-sm font-medium text-white">Upload hingga 3 screenshot</p>
+          <p className="text-xs text-slate-500">Multi-pass OCR · Match history / scoreboard</p>
           <label className="mt-3 cursor-pointer rounded-xl bg-slate-700 px-4 py-2 text-sm text-white hover:bg-slate-600">
-            Pilih File
+            Pilih File (max {MAX_SCREENSHOTS})
             <input type="file" accept="image/*" multiple onChange={(e) => handleFiles(e.target.files)} className="hidden" />
           </label>
           {previews.length > 0 && (
-            <div className="mt-4 flex gap-2">
+            <div className="mt-4 flex flex-wrap justify-center gap-2">
               {previews.map((src, i) => (
-                <img key={i} src={src} alt="" className="h-16 w-28 rounded object-cover" />
+                <div key={i} className="relative">
+                  <img src={src} alt="" className="h-16 w-28 rounded object-cover ring-1 ring-white/10" />
+                  <span className="absolute bottom-0.5 left-0.5 rounded bg-black/70 px-1 text-[9px] font-bold text-emerald">SS{i + 1}</span>
+                </div>
               ))}
             </div>
           )}
           <div className="mt-4 flex flex-wrap justify-center gap-2">
             {files.length > 0 && (
               <Button onClick={runOCR} loading={scanning} disabled={scanning}>
-                <Scan size={18} /> Mulai Scan OCR
+                <Scan size={18} /> Scan {files.length} Screenshot{files.length > 1 ? 's' : ''}
               </Button>
             )}
-            <Button variant="ghost" onClick={() => setManualOpen(true)}>
+            <Button variant="ghost" onClick={() => { setStartStep(3); setManualOpen(true); }}>
               <PencilSimple size={18} /> Use Manual Input
             </Button>
           </div>
@@ -244,7 +278,7 @@ export default function MatchInputTab() {
           <h3 className="mb-3 font-bold text-white">Scan Progress & Logs</h3>
           <ProgressBar value={progress} className="mb-3" />
           <p className="mb-3 font-mono text-xs text-emerald">
-            {scanning ? `Scanning... ${progress}%` : progress === 100 ? 'Complete' : 'Idle'}
+            {scanning ? `Scanning... ${progress}%` : progress === 100 ? 'Complete — verify in modal' : 'Idle'}
           </p>
           <TerminalLogs logs={logs} />
         </div>

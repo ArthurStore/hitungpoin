@@ -74,13 +74,15 @@ export default function OfficialLeaderboard({ tournament, standings, matches = [
           <div className="h-px bg-gradient-to-r from-transparent via-amber-500/50 to-transparent" />
         </div>
 
-        <div className="relative z-10 flex-1 overflow-hidden px-4 pb-4">
+        <div className="relative z-10 flex-1 overflow-hidden px-3 pb-4">
           <div
-            className="mb-2 grid gap-1 px-1 text-[8px] font-bold uppercase tracking-wider text-slate-400"
-            style={{ gridTemplateColumns: `28px 1fr repeat(${totalMatches}, 22px) 32px` }}
+            className="mb-2 grid gap-0.5 px-0.5 text-[8px] font-bold uppercase tracking-wider text-slate-400"
+            style={{
+              gridTemplateColumns: `22px minmax(0, 88px) repeat(${totalMatches}, minmax(0, 1fr)) 28px`,
+            }}
           >
             <span>#</span>
-            <span>Team</span>
+            <span className="truncate">Team</span>
             {matchNumbers.map((n) => <span key={n} className="text-center">M{n}</span>)}
             <span className="text-right">PTS</span>
           </div>
@@ -98,22 +100,24 @@ export default function OfficialLeaderboard({ tournament, standings, matches = [
               return (
                 <div
                   key={team.teamId || team.teamName}
-                  className={`grid items-center gap-1 rounded-lg bg-gradient-to-r px-1 py-1 ring-1 ${rs.row} ${rs.ring}`}
-                  style={{ gridTemplateColumns: `28px 1fr repeat(${totalMatches}, 22px) 32px` }}
+                  className={`grid items-center gap-0.5 rounded-md bg-gradient-to-r px-0.5 py-0.5 ring-1 ${rs.row} ${rs.ring}`}
+                  style={{
+                    gridTemplateColumns: `22px minmax(0, 88px) repeat(${totalMatches}, minmax(0, 1fr)) 28px`,
+                  }}
                 >
-                  <div className={`flex h-6 w-7 items-center justify-center rounded-md text-[10px] font-black ${rs.badge}`}>
+                  <div className={`flex h-5 w-5 items-center justify-center rounded text-[9px] font-black ${rs.badge}`}>
                     {team.rank}
                   </div>
-                  <p className="truncate pr-1 text-[9px] font-bold uppercase tracking-wide text-white">
-                    {team.rank === 1 && <Fire size={10} weight="fill" className="mr-0.5 inline text-orange-300" />}
+                  <p className="truncate text-[8px] font-bold uppercase leading-tight tracking-wide text-white" title={team.teamName}>
+                    {team.rank === 1 && <Fire size={8} weight="fill" className="mr-0.5 inline text-orange-300" />}
                     {team.teamName}
                   </p>
                   {matchNumbers.map((n) => (
-                    <span key={n} className="text-center font-mono text-[8px] font-semibold text-slate-300">
+                    <span key={n} className="text-center font-mono text-[7px] font-semibold text-slate-300">
                       {team.matchScores?.[n] ?? '-'}
                     </span>
                   ))}
-                  <span className="text-right font-mono text-[9px] font-black text-amber-400">
+                  <span className="text-right font-mono text-[8px] font-black text-amber-400">
                     {team.totalPoints}
                   </span>
                 </div>

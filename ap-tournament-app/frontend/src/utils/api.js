@@ -1,14 +1,22 @@
 /**
  * API base URL resolution:
- * - Local dev: empty -> `/api` (Vite proxy to backend)
- * - VPS/production: set VITE_API_BASE_URL=http://<IP>:5001/api
+ * - Explicit: VITE_API_BASE_URL=http://<IP>:5001/api
+ * - Local Vite: `/api` (proxied to :5001)
+ * - VPS on :5174 without env: auto-map host → :5001/api
  */
 const envBase = import.meta.env.VITE_API_BASE_URL;
 
 function resolveApiBase() {
-  if (envBase) {
-    return envBase.replace(/\/$/, '');
+  if (envBase) return envBase.replace(/\/$/, '');
+
+  if (typeof window !== 'undefined') {
+    const { protocol, hostname, port } = window.location;
+    // Vite/frontend on 5174 → backend lives on 5001
+    if (port === '5174' || port === '5173') {
+      return `${protocol}//${hostname}:5001/api`;
+    }
   }
+
   return '/api';
 }
 
@@ -16,8 +24,8 @@ export const API_BASE = resolveApiBase();
 
 export function resolveAssetUrl(path) {
   if (!path) return '';
-  if (path.startsWith('data:') || path.startsWith('http')) return path;
-  const origin = envBase ? envBase.replace(/\/api\/?$/, '') : '';
+  if (path.startsWith('data:') || path.startsWith('http') || path.startsWith('blob:')) return path;
+  const origin = API_BASE.replace(/\/api\/?$/, '');
   return `${origin}${path.startsWith('/') ? path : `/${path}`}`;
 }
 
@@ -107,10 +115,23 @@ export const api = {
       });
   },
 
-  verifyAdminPin: (pin) => request('/admin/verify-pin', { headers: adminHeaders(pin) }),
+  /** Must be POST — backend only registers POST /verify-pin */
+  verifyAdminPin: (pin) => request('/admin/verify-pin', {
+    method: 'POST',
+    headers: adminHeaders(pin),
+    body: JSON.stringify({}),
+  }),
   getAdminMetrics: (pin) => request('/admin/metrics', { headers: adminHeaders(pin) }),
-  resetAllTournaments: (pin) => request('/admin/reset-tournaments', { method: 'POST', headers: adminHeaders(pin) }),
-  resetMediaStorage: (pin) => request('/admin/reset-media', { method: 'POST', headers: adminHeaders(pin) }),
+  resetAllTournaments: (pin) => request('/admin/reset-tournaments', {
+    method: 'POST',
+    headers: adminHeaders(pin),
+    body: JSON.stringify({}),
+  }),
+  resetMediaStorage: (pin) => request('/admin/reset-media', {
+    method: 'POST',
+    headers: adminHeaders(pin),
+    body: JSON.stringify({}),
+  }),
 
   getPublicStandings: (id) => request(`/public/${id}/standings`),
 };

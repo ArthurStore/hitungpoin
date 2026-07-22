@@ -127,46 +127,184 @@ export async function scanWithLogs(dataUrl, onLog, onProgress) {
   };
 }
 
-/** Mode 1: CR Biasa - parse kill counts per team from full scoreboard */
+/** Mode 1: CR Biasa — scoreboard + match-history nickname/kill lines */
 export function parseCrBiasa(text) {
   const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
-  const teamKills = {};
-
-  lines.forEach((line) => {
-    const killMatch = line.match(/(\d+)\s*[Kk]ill/i);
-    if (killMatch) {
-      const kills = parseInt(killMatch[1], 10);
-      const namePart = line.replace(/\d+\s*[Kk]ill.*/i, '').trim();
-      const tag = namePart.split(/\s+/)[0];
-      if (tag && tag.length > 2) {
-        teamKills[tag] = (teamKills[tag] || 0) + kills;
-      }
-    }
-  });
-
-  const rankBlocks = text.match(/(?:^|\n)\s*(\d{1,2})\s+([A-Za-z0-9\s_.!-]{3,40})/gm) || [];
   const results = [];
   const seen = new Set();
 
+  // Pattern: "#1 Nickname 8 Kill" or "1. Nickname  8Kill"
+  lines.forEach((line) => {
+    const killLine = line.match(
+      /^(?:#?\s*)?(\d{1,2})[.)\s:-]+([A-Za-z0-9_\-!?.][A-Za-z0-9_\-!?.\s]{1,28}?)\s+(\d{1,3})\s*[Kk]ills?/i
+    );
+    if (killLine) {
+      const placement = parseInt(killLine[1], 10);
+      if (placement >= 1 && placement <= 12 && !seen.has(placement)) {
+        seen.add(placement);
+        results.push({
+          placement,
+          rank: placement,
+          teamName: killLine[2].trim(),
+          nickname: killLine[2].trim(),
+          kills: parseInt(killLine[3], 10),
+        });
+      }
+      return;
+    }
+
+    // Nickname … N Kill (no explicit rank) — collect as nickname hits
+    const nickKill = line.match(
+      /^([A-Za-z0-9_\-!?.][A-Za-z0-9_\-!?.\s]{1,28}?)\s+(\d{1,3})\s*[Kk]ills?/i
+    );
+    if (nickKill && !/^\d+$/.test(nickKill[1])) {
+      results.push({
+        placement: null,
+        rank: null,
+        teamName: nickKill[1].trim(),
+        nickname: nickKill[1].trim(),
+        kills: parseInt(nickKill[2], 10),
+        unranked: true,
+      });
+    }
+  });
+
+  // Rank + name blocks without kill suffix
+  const rankBlocks = text.match(/(?:^|\n)\s*#?\s*(\d{1,2})[.)\s:-]+([A-Za-z0-9\s_.!-]{2,40})/gm) || [];
   rankBlocks.forEach((block) => {
-    const m = block.match(/(\d{1,2})\s+(.+)/);
+    const m = block.match(/(\d{1,2})\D+(.+)/);
     if (!m) return;
     const placement = parseInt(m[1], 10);
     if (placement > 12 || seen.has(placement)) return;
     seen.add(placement);
-
-    let teamName = m[2].trim().split(/\s+\d/)[0].trim();
-    const tagMatch = teamName.match(/^([A-Z]{2,5})/);
-    const tag = tagMatch?.[1];
-    const kills = tag ? (teamKills[tag] || 0) : 0;
-
-    results.push({ placement, teamName, kills, rank: placement });
+    const teamName = m[2].replace(/\d+\s*[Kk]ill.*/i, '').trim().split(/\s{2,}/)[0].trim();
+    if (!teamName || teamName.length < 2) return;
+    const killMatch = block.match(/(\d+)\s*[Kk]ill/i);
+    results.push({
+      placement,
+      rank: placement,
+      teamName,
+      nickname: teamName,
+      kills: killMatch ? parseInt(killMatch[1], 10) : 0,
+    });
   });
 
-  if (results.length === 0) {
-    return parseGenericRankTeamScore(text);
+  const ranked = results.filter((r) => r.placement != null).sort((a, b) => a.placement - b.placement);
+  if (ranked.length === 0) {
+    const generic = parseGenericRankTeamScore(text);
+    if (generic.length) return generic;
+    // promote unranked nicknames into sequential slots
+    return results
+      .filter((r) => r.unranked)
+      .slice(0, 12)
+      .map((r, i) => ({ ...r, placement: i + 1, rank: i + 1, unranked: false }));
   }
-  return results.sort((a, b) => a.placement - b.placement);
+  return ranked;
+}
+
+/**
+ * Scan up to 3 screenshots and merge detections (multi-pass).
+ * Returns { success, entries, nicknames, texts, errors }
+ */
+export async function scanMultiPass(dataUrls, mode, onLog, onProgress) {
+  const allParsed = [];
+  const texts = [];
+  const errors = [];
+  const total = dataUrls.length || 1;
+
+  for (let i = 0; i < dataUrls.length; i += 1) {
+    onLog?.(`--- Pass ${i + 1}/${dataUrls.length}: scanning screenshot ---`);
+    const base = (i / total) * 100;
+    const result = await scanWithLogs(dataUrls[i], onLog, (pct) => {
+      onProgress?.(Math.round(base + pct / total));
+    });
+
+    if (!result.success || !result.text?.trim()) {
+      errors.push(result.error || `Pass ${i + 1} failed`);
+      onLog?.(`Pass ${i + 1} failed: ${result.error || 'empty'}`);
+      continue;
+    }
+
+    texts.push(result.text);
+    const parsed = parseByMode(result.text, mode);
+    onLog?.(`Pass ${i + 1}: extracted ${parsed.length} entries`);
+    parsed.forEach((p) => allParsed.push({ ...p, pass: i + 1 }));
+  }
+
+  if (allParsed.length === 0) {
+    return {
+      success: false,
+      error: errors[0] || 'No data from any screenshot',
+      entries: [],
+      nicknames: [],
+      texts,
+    };
+  }
+
+  const merged = mergeMultiPassResults(allParsed);
+  const nicknames = extractNicknameList(allParsed);
+
+  onLog?.(`Multi-pass merge: ${merged.length} placements, ${nicknames.length} nicknames`);
+  onProgress?.(100);
+
+  return { success: true, entries: merged, nicknames, texts, errors };
+}
+
+/** Vote/merge by placement across passes */
+export function mergeMultiPassResults(allParsed) {
+  const byPlacement = new Map();
+
+  allParsed.forEach((r) => {
+    const place = r.placement || r.rank;
+    if (!place || place < 1 || place > 12) return;
+    if (!byPlacement.has(place)) byPlacement.set(place, []);
+    byPlacement.get(place).push(r);
+  });
+
+  const merged = [];
+  for (let p = 1; p <= 12; p += 1) {
+    const group = byPlacement.get(p);
+    if (!group?.length) continue;
+
+    const nameVotes = {};
+    const killVotes = {};
+    group.forEach((g) => {
+      const n = (g.teamName || g.nickname || '').trim();
+      if (n) nameVotes[n] = (nameVotes[n] || 0) + 1;
+      const k = parseInt(g.kills ?? g.totalScore ?? 0, 10) || 0;
+      killVotes[k] = (killVotes[k] || 0) + 1;
+    });
+
+    const bestName = Object.entries(nameVotes).sort((a, b) => b[1] - a[1])[0]?.[0] || '';
+    const bestKills = parseInt(Object.entries(killVotes).sort((a, b) => b[1] - a[1])[0]?.[0] || '0', 10);
+
+    merged.push({
+      placement: p,
+      rank: p,
+      teamName: bestName,
+      nickname: bestName,
+      kills: bestKills,
+      totalScore: bestKills,
+      votes: group.length,
+    });
+  }
+
+  return merged;
+}
+
+export function extractNicknameList(allParsed) {
+  const map = new Map();
+  allParsed.forEach((r) => {
+    const n = (r.nickname || r.teamName || '').trim();
+    if (!n || n.length < 2) return;
+    const key = n.toLowerCase();
+    const prev = map.get(key) || { nickname: n, kills: 0, hits: 0, placements: [] };
+    prev.hits += 1;
+    prev.kills = Math.max(prev.kills, parseInt(r.kills, 10) || 0);
+    if (r.placement) prev.placements.push(r.placement);
+    map.set(key, prev);
+  });
+  return Array.from(map.values()).sort((a, b) => b.hits - a.hits || a.nickname.localeCompare(b.nickname));
 }
 
 /** Mode 2: CR League / RANKLIST - Rank | Team Name | Score */
