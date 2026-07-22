@@ -38,7 +38,7 @@ app.get('/', (_req, res) => {
 });
 
 app.get('/api/health', (_req, res) => {
-  res.json({ status: 'ok', app: 'AP (Arthur Points)', version: '2.3.0', ocr: 'gemini-2.0-flash' });
+  res.json({ status: 'ok', app: 'AP (Arthur Points)', version: '2.3.0', ocr: 'gemini-flash-latest' });
 });
 
 app.use('/api/auth', authRoutes);

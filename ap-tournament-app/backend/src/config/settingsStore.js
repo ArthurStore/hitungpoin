@@ -7,7 +7,7 @@ const SETTINGS_PATH = path.join(__dirname, '../../data/settings.json');
 
 const defaultSettings = {
   geminiApiKey: process.env.GEMINI_API_KEY || '',
-  geminiModel: 'gemini-2.0-flash',
+  geminiModel: 'gemini-flash-latest',
   geminiDailyUsage: 0,
   geminiDailyDate: '',
   geminiLastLatencyMs: null,

@@ -74,7 +74,7 @@ export async function getAdminMetrics(req, res) {
       gemini: {
         configured: hasKey,
         maskedKey: maskKey(settings.geminiApiKey || process.env.GEMINI_API_KEY || ''),
-        model: settings.geminiModel || 'gemini-2.0-flash',
+        model: settings.geminiModel || 'gemini-flash-latest',
         dailyUsage: settings.geminiDailyUsage || 0,
         dailyDate: settings.geminiDailyDate || '',
         lastLatencyMs: settings.geminiLastLatencyMs,

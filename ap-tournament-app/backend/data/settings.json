@@ -1,0 +1,11 @@
+{
+  "geminiApiKey": "AQ.Ab8RN6J26ohLuCZrFOYH478O5cV6t1UqLjtxrlXY-wXQhe7_gw",
+  "geminiModel": "gemini-flash-latest",
+  "geminiDailyUsage": 1,
+  "geminiDailyDate": "2026-07-22",
+  "geminiLastLatencyMs": 18598,
+  "geminiLastStatus": "error",
+  "geminiLastError": "No results parsed from Gemini response",
+  "scansAi": 0,
+  "scansManual": 0
+}

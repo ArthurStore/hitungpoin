@@ -58,7 +58,7 @@ export async function runGeminiVisionOcr(imageBuffer, mimeType = 'image/png') {
     const base64 = imageBuffer.toString('base64');
 
     const response = await ai.models.generateContent({
-      model: 'gemini-2.0-flash',
+      model: 'gemini-flash-latest',
       contents: [
         {
           role: 'user',
@@ -125,7 +125,7 @@ export async function testGeminiConnection(apiKeyOverride) {
   try {
     const ai = new GoogleGenAI({ apiKey });
     const response = await ai.models.generateContent({
-      model: 'gemini-2.0-flash',
+      model: 'gemini-flash-latest',
       contents: 'Reply with exactly: OK',
       config: { maxOutputTokens: 16, temperature: 0 },
     });
