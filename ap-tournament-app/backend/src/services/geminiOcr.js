@@ -1,31 +1,48 @@
 import { GoogleGenAI } from '@google/genai';
 import { getGeminiApiKey, bumpGeminiUsage } from '../config/settingsStore.js';
 
-const SYSTEM_PROMPT = `You are an OCR expert for Free Fire (Garena) esports match screenshots.
-Analyze the image and extract match placement results.
+const SYSTEM_PROMPT = `Analisis screenshot scoreboard Free Fire ini. Ekstrak data semua tim/player ke dalam format JSON ARRAY murni tanpa teks/markdown tambahan. Format yang wajib dikembalikan:
+[
+  { "rank": 1, "team_name": "EXC", "kills": 2 },
+  { "rank": 2, "team_name": "Dipsy95", "kills": 6 }
+]
 
-Return ONLY valid JSON (no markdown, no code fences) with this exact shape:
-{"results":[{"rank":1,"team_name":"TEAM","kills":0}]}
-
-Rules:
+Aturan:
 - rank: integer 1-12 (placement / booyah = 1)
-- team_name: team tag or player nickname as shown
-- kills: integer kill count for that row (0 if unknown)
-- Include up to 12 rows, sorted by rank ascending
-- If this is a match history with individual players, use the nickname as team_name
-- Ignore UI chrome, buttons, and unrelated text`;
+- team_name: tag tim atau nickname player sesuai layar
+- kills: integer jumlah kill (0 jika tidak terbaca)
+- Maksimal 12 baris, urut naik berdasarkan rank
+- Jangan tambahkan markdown, code fence, atau teks penjelasan di luar JSON array`;
 
 function extractJson(text) {
   if (!text) return null;
-  const cleaned = text.replace(/```json\s*/gi, '').replace(/```/g, '').trim();
+
+  const cleanResponse = text.replace(/```json/g, '').replace(/```/g, '').trim();
+
   try {
-    return JSON.parse(cleaned);
+    return JSON.parse(cleanResponse);
   } catch {
-    const match = cleaned.match(/\{[\s\S]*\}/);
-    if (match) {
-      try { return JSON.parse(match[0]); } catch { return null; }
+    // Prefer JSON array [...] as required by the prompt
+    const arrayMatch = cleanResponse.match(/\[[\s\S]*\]/);
+    if (arrayMatch) {
+      try {
+        return JSON.parse(arrayMatch[0]);
+      } catch {
+        /* fall through */
+      }
+    }
+
+    // Legacy fallback: wrapped object { "results": [...] }
+    const objectMatch = cleanResponse.match(/\{[\s\S]*\}/);
+    if (objectMatch) {
+      try {
+        return JSON.parse(objectMatch[0]);
+      } catch {
+        return null;
+      }
     }
   }
+
   return null;
 }
 
