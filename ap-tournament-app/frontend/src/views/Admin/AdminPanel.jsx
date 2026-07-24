@@ -246,8 +246,19 @@ export default function AdminPanel() {
             />
           </label>
           {testResult && (
-            <pre className="mt-3 max-h-48 overflow-auto rounded-lg bg-black/40 p-3 font-mono text-[11px] text-emerald/90">
-              {JSON.stringify(testResult.results || testResult, null, 2)}
+            <pre className="mt-3 max-h-64 overflow-auto rounded-lg bg-black/40 p-3 font-mono text-[11px] text-emerald/90">
+              {JSON.stringify(
+                {
+                  ok: testResult.ok,
+                  model: testResult.model,
+                  latencyMs: testResult.latencyMs,
+                  error: testResult.error,
+                  results: testResult.results,
+                  rawPreview: testResult.rawPreview || testResult.text?.slice?.(0, 300),
+                },
+                null,
+                2
+              )}
             </pre>
           )}
         </div>
