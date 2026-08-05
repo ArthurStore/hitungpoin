@@ -9,7 +9,7 @@ async function dataUrlToBlob(dataUrl) {
 
 /** Primary OCR: Gemini Vision via backend */
 export async function scanWithLogs(dataUrl, onLog, onProgress) {
-  onLog?.('Sending screenshot to Gemini Vision (gemini-2.0-flash)...', 5);
+  onLog?.('Sending screenshot to Gemini Vision (gemini-flash-latest)...', 5);
   onProgress?.(10);
 
   try {

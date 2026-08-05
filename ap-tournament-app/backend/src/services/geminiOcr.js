@@ -8,13 +8,28 @@ const SYSTEM_PROMPT = `Analisis screenshot scoreboard Free Fire ini. Ekstrak dat
 
 Aturan:
 - rank: integer 1-12 (placement / booyah = 1)
-- team_name: tag tim atau nickname player sesuai layar
+- team_name: tag tim atau nickname player sesuai layar (perwakilan yang terbaca)
 - kills: integer jumlah kill (0 jika tidak terbaca)
 - Maksimal 12 baris, urut naik berdasarkan rank
 - Jangan tambahkan markdown, code fence, atau teks penjelasan di luar JSON array
-- Jika tidak ada data di gambar, kembalikan []`;
+- Baca SEMUA baris yang terlihat di screenshot — jangan kembalikan [] jika ada data skor/tim
+- Hanya kembalikan [] jika gambar benar-benar kosong / bukan scoreboard`;
 
-const DEFAULT_MODEL = 'gemini-2.0-flash';
+/** Alias non-versioned — hindari model static (2.0 / 2.5 / 1.5 / 1.0) yang sering 404 / deprecated */
+const DEFAULT_MODEL = 'gemini-flash-latest';
+
+const RESULT_SCHEMA = {
+  type: 'ARRAY',
+  items: {
+    type: 'OBJECT',
+    properties: {
+      rank: { type: 'INTEGER' },
+      team_name: { type: 'STRING' },
+      kills: { type: 'INTEGER' },
+    },
+    required: ['rank', 'team_name', 'kills'],
+  },
+};
 
 function extractJson(text) {
   if (!text) return null;
@@ -25,7 +40,6 @@ function extractJson(text) {
     .replace(/^\uFEFF/, '')
     .trim();
 
-  // Strip common prefixes like "Here is the JSON:"
   const firstBracket = Math.min(
     ...[cleanResponse.indexOf('['), cleanResponse.indexOf('{')]
       .filter((i) => i >= 0)
@@ -40,7 +54,6 @@ function extractJson(text) {
     const arrayMatch = cleanResponse.match(/\[[\s\S]*\]/);
     if (arrayMatch) {
       try {
-        // Fix trailing commas often produced by LLMs
         const fixed = arrayMatch[0].replace(/,\s*([\]}])/g, '$1');
         return JSON.parse(fixed);
       } catch { /* fall through */ }
@@ -87,16 +100,19 @@ function parseLooseLines(text) {
 function normalizeResults(parsed) {
   const list = Array.isArray(parsed?.results) ? parsed.results
     : Array.isArray(parsed?.data) ? parsed.data
-      : Array.isArray(parsed) ? parsed
-        : [];
+      : Array.isArray(parsed?.teams) ? parsed.teams
+        : Array.isArray(parsed) ? parsed
+          : (parsed && typeof parsed === 'object' && (parsed.rank != null || parsed.team_name || parsed.teamName)
+            ? [parsed]
+            : []);
 
   return list
     .map((r) => ({
       rank: parseInt(r.rank ?? r.placement ?? r.place, 10),
       placement: parseInt(r.rank ?? r.placement ?? r.place, 10),
-      teamName: String(r.team_name || r.teamName || r.nickname || r.name || '').trim(),
-      nickname: String(r.team_name || r.teamName || r.nickname || r.name || '').trim(),
-      kills: parseInt(r.kills ?? r.kill ?? 0, 10) || 0,
+      teamName: String(r.team_name || r.teamName || r.nickname || r.name || r.player || '').trim(),
+      nickname: String(r.nickname || r.team_name || r.teamName || r.name || r.player || '').trim(),
+      kills: parseInt(r.kills ?? r.kill ?? r.elim ?? r.eliminations ?? 0, 10) || 0,
     }))
     .filter((r) => r.rank >= 1 && r.rank <= 12 && r.teamName)
     .sort((a, b) => a.rank - b.rank);
@@ -105,10 +121,13 @@ function normalizeResults(parsed) {
 function getModelName() {
   const fromSettings = loadSettings().geminiModel;
   const fromEnv = process.env.GEMINI_MODEL;
-  // Prefer stable flash model over alias that may change behavior
-  const model = fromSettings || fromEnv || DEFAULT_MODEL;
-  if (model === 'gemini-flash-latest') return DEFAULT_MODEL;
-  return model;
+  const raw = (fromSettings || fromEnv || DEFAULT_MODEL).trim();
+
+  // Paksa alias latest — model static sering 404 / deprecated
+  if (/^gemini-(1\.0|1\.5|2\.0|2\.5)(-|$)/i.test(raw) || raw === 'gemini-pro' || raw === 'gemini-flash') {
+    return DEFAULT_MODEL;
+  }
+  return raw || DEFAULT_MODEL;
 }
 
 function extractTextFromResponse(data) {
@@ -126,7 +145,6 @@ function extractTextFromResponse(data) {
   const finishReason = candidate.finishReason || candidate.finish_reason || null;
   const parts = candidate?.content?.parts || [];
 
-  // Skip "thought" parts if present; join text parts
   const text = parts
     .filter((p) => typeof p.text === 'string' && !p.thought)
     .map((p) => p.text)
@@ -141,13 +159,12 @@ function extractTextFromResponse(data) {
  * REST Gemini API — MUST use snake_case field names for multimodal parts.
  * camelCase (inlineData) is silently ignored → model only sees text → returns [].
  */
-async function callGeminiGenerateContent({ apiKey, model, parts }) {
+async function callGeminiGenerateContent({ apiKey, model, parts, withThinkingOff = true }) {
   const prevVertex = process.env.GOOGLE_GENAI_USE_VERTEXAI;
   delete process.env.GOOGLE_GENAI_USE_VERTEXAI;
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
 
-  // Normalize parts to REST snake_case
   const restParts = parts.map((p) => {
     if (p.text != null) return { text: p.text };
     const inline = p.inline_data || p.inlineData;
@@ -162,6 +179,18 @@ async function callGeminiGenerateContent({ apiKey, model, parts }) {
     return p;
   });
 
+  const generationConfig = {
+    temperature: 0.1,
+    maxOutputTokens: 8192,
+    responseMimeType: 'application/json',
+    responseSchema: RESULT_SCHEMA,
+  };
+
+  // Thinking tokens sering menghabiskan budget → output kosong / []
+  if (withThinkingOff) {
+    generationConfig.thinkingConfig = { thinkingBudget: 0 };
+  }
+
   try {
     const res = await fetch(url, {
       method: 'POST',
@@ -171,11 +200,7 @@ async function callGeminiGenerateContent({ apiKey, model, parts }) {
       },
       body: JSON.stringify({
         contents: [{ role: 'user', parts: restParts }],
-        generationConfig: {
-          temperature: 0.1,
-          maxOutputTokens: 4096,
-          responseMimeType: 'application/json',
-        },
+        generationConfig,
       }),
     });
 
@@ -187,6 +212,7 @@ async function callGeminiGenerateContent({ apiKey, model, parts }) {
       const err = new Error(reason ? `${msg} [${reason}]` : msg);
       err.status = res.status;
       err.payload = data;
+      err.retryWithoutThinking = withThinkingOff && /thinking/i.test(msg);
       throw err;
     }
 
@@ -208,7 +234,23 @@ function friendlyAuthError(err) {
       + 'dan pastikan Generative Language API aktif.'
     );
   }
+  if (err?.status === 404 || /no longer available|not found|NOT_FOUND/i.test(msg)) {
+    return (
+      `Model tidak tersedia (${msg}). Gunakan alias gemini-flash-latest — jangan pin ke 2.0/2.5/1.5.`
+    );
+  }
   return msg;
+}
+
+async function generateOcrContent(apiKey, model, parts) {
+  try {
+    return await callGeminiGenerateContent({ apiKey, model, parts, withThinkingOff: true });
+  } catch (err) {
+    if (err.retryWithoutThinking) {
+      return callGeminiGenerateContent({ apiKey, model, parts, withThinkingOff: false });
+    }
+    throw err;
+  }
 }
 
 export async function runGeminiVisionOcr(imageBuffer, mimeType = 'image/png') {
@@ -224,19 +266,17 @@ export async function runGeminiVisionOcr(imageBuffer, mimeType = 'image/png') {
       ? imageBuffer.toString('base64')
       : Buffer.from(imageBuffer).toString('base64');
 
-    const { text, finishReason, blockReason, raw } = await callGeminiGenerateContent({
-      apiKey,
-      model,
-      parts: [
-        { text: SYSTEM_PROMPT },
-        {
-          inline_data: {
-            mime_type: mimeType || 'image/png',
-            data: base64,
-          },
+    const parts = [
+      { text: SYSTEM_PROMPT },
+      {
+        inline_data: {
+          mime_type: mimeType || 'image/png',
+          data: base64,
         },
-      ],
-    });
+      },
+    ];
+
+    const { text, finishReason, blockReason, raw } = await generateOcrContent(apiKey, model, parts);
 
     const latency = Date.now() - started;
 
@@ -297,6 +337,7 @@ export async function runGeminiVisionOcr(imageBuffer, mimeType = 'image/png') {
       text: '',
       results: [],
       latencyMs: latency,
+      model: getModelName(),
     };
   }
 }
@@ -308,7 +349,6 @@ export async function testGeminiConnection(apiKeyOverride) {
   const started = Date.now();
   try {
     const model = getModelName();
-    // Plain text ping — don't force JSON mime for connection test
     const prevVertex = process.env.GOOGLE_GENAI_USE_VERTEXAI;
     delete process.env.GOOGLE_GENAI_USE_VERTEXAI;
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
@@ -320,13 +360,39 @@ export async function testGeminiConnection(apiKeyOverride) {
       },
       body: JSON.stringify({
         contents: [{ role: 'user', parts: [{ text: 'Reply with exactly: OK' }] }],
-        generationConfig: { maxOutputTokens: 16, temperature: 0 },
+        generationConfig: {
+          maxOutputTokens: 16,
+          temperature: 0,
+          thinkingConfig: { thinkingBudget: 0 },
+        },
       }),
     });
     const data = await res.json().catch(() => ({}));
     if (prevVertex !== undefined) process.env.GOOGLE_GENAI_USE_VERTEXAI = prevVertex;
 
     if (!res.ok) {
+      // Retry tanpa thinkingConfig jika model menolak
+      if (/thinking/i.test(data?.error?.message || '')) {
+        const res2 = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': apiKey,
+          },
+          body: JSON.stringify({
+            contents: [{ role: 'user', parts: [{ text: 'Reply with exactly: OK' }] }],
+            generationConfig: { maxOutputTokens: 16, temperature: 0 },
+          }),
+        });
+        const data2 = await res2.json().catch(() => ({}));
+        if (!res2.ok) {
+          const err = new Error(data2?.error?.message || `HTTP ${res2.status}`);
+          err.status = res2.status;
+          throw err;
+        }
+        const { text } = extractTextFromResponse(data2);
+        return { ok: true, latencyMs: Date.now() - started, sample: (text || '').slice(0, 40), model };
+      }
       const err = new Error(data?.error?.message || `HTTP ${res.status}`);
       err.status = res.status;
       throw err;
@@ -339,6 +405,7 @@ export async function testGeminiConnection(apiKeyOverride) {
       ok: false,
       error: friendlyAuthError(err),
       latencyMs: Date.now() - started,
+      model: getModelName(),
     };
   }
 }

@@ -22,12 +22,28 @@ function ensureDir() {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 }
 
+function migrateModel(model) {
+  const m = (model || '').trim();
+  if (!m || /^gemini-(1\.0|1\.5|2\.0|2\.5)(-|$)/i.test(m) || m === 'gemini-pro' || m === 'gemini-flash') {
+    return 'gemini-flash-latest';
+  }
+  return m;
+}
+
 export function loadSettings() {
   ensureDir();
   try {
     if (fs.existsSync(SETTINGS_PATH)) {
       const raw = JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf8'));
-      return { ...defaultSettings, ...raw };
+      const merged = { ...defaultSettings, ...raw };
+      const fixedModel = migrateModel(merged.geminiModel);
+      if (fixedModel !== merged.geminiModel) {
+        merged.geminiModel = fixedModel;
+        try {
+          fs.writeFileSync(SETTINGS_PATH, JSON.stringify(merged, null, 2));
+        } catch { /* ignore */ }
+      }
+      return merged;
     }
   } catch { /* ignore */ }
   const seed = { ...defaultSettings };

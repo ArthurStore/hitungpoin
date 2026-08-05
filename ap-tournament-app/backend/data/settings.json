@@ -1,6 +1,6 @@
 {
   "geminiApiKey": "AQ.Ab8RN6J26ohLuCZrFOYH478O5cV6t1UqLjtxrlXY-wXQhe7_gw",
-  "geminiModel": "gemini-2.0-flash",
+  "geminiModel": "gemini-flash-latest",
   "geminiLastStatus": "updated",
   "geminiLastError": "",
   "scansAi": 0,

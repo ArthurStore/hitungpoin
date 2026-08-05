@@ -7,8 +7,76 @@ import {
   Shield, ArrowLeft, Warning, Trash, HardDrives, Lightning, Flask, Image as ImageIcon,
 } from '@phosphor-icons/react';
 import { api } from '../../utils/api';
+import { calcMatchPoints } from '../../utils/pointsCalc';
 import Button from '../../components/Button';
 import Toast from '../../components/Toast';
+
+function AnalyserPreview({ result }) {
+  if (!result) return null;
+
+  const rows = calcMatchPoints(
+    (result.results || []).map((r) => ({
+      placement: r.placement || r.rank,
+      rank: r.rank || r.placement,
+      teamName: r.teamName || r.team_name || '',
+      nickname: r.nickname || r.teamName || r.team_name || '',
+      kills: r.kills ?? 0,
+    })),
+    'cr_biasa'
+  );
+
+  return (
+    <div className="mt-3 space-y-3">
+      <div className="flex flex-wrap gap-3 text-[11px] text-slate-400">
+        <span>Model: <span className="font-mono text-white">{result.model || '—'}</span></span>
+        <span>Latency: <span className="font-mono text-white">{result.latencyMs != null ? `${result.latencyMs}ms` : '—'}</span></span>
+        <span className={result.ok || result.success ? 'text-emerald' : 'text-crimson'}>
+          {result.ok || result.success ? `OK · ${rows.length} baris` : (result.error || 'Gagal')}
+        </span>
+      </div>
+
+      {rows.length > 0 ? (
+        <div className="overflow-x-auto rounded-xl border border-white/10">
+          <table className="w-full min-w-[420px] text-left text-xs">
+            <thead className="bg-slate-800/80 text-[10px] uppercase tracking-wide text-slate-500">
+              <tr>
+                <th className="px-3 py-2">#</th>
+                <th className="px-3 py-2">Tim / Nick Perwakilan</th>
+                <th className="px-3 py-2 text-right">Kills</th>
+                <th className="px-3 py-2 text-right">Poin</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.placement} className="border-t border-white/5 text-slate-200">
+                  <td className="px-3 py-2 font-mono text-gold">{r.placement}</td>
+                  <td className="px-3 py-2 font-medium text-white">{r.nickname || r.teamName}</td>
+                  <td className="px-3 py-2 text-right font-mono">{r.kills}</td>
+                  <td className="px-3 py-2 text-right font-mono font-bold text-emerald">{r.totalPoints}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <p className="rounded-lg bg-crimson/10 px-3 py-2 text-xs text-crimson">
+          Tidak ada baris ter-parse (output kosong / []). Coba screenshot scoreboard yang lebih jelas.
+        </p>
+      )}
+
+      {(result.rawPreview || result.text || result.raw) && (
+        <details className="rounded-lg bg-black/40">
+          <summary className="cursor-pointer px-3 py-2 text-[11px] text-slate-500">Raw response</summary>
+          <pre className="max-h-40 overflow-auto px-3 pb-3 font-mono text-[10px] text-emerald/80">
+            {typeof (result.rawPreview || result.text || result.raw) === 'string'
+              ? (result.rawPreview || result.text || result.raw)
+              : JSON.stringify(result.results ?? result, null, 2)}
+          </pre>
+        </details>
+      )}
+    </div>
+  );
+}
 
 function ConfirmModal({ open, title, message, onConfirm, onCancel, loading }) {
   if (!open) return null;
@@ -199,7 +267,7 @@ export default function AdminPanel() {
         <div className="mb-4 grid gap-3 sm:grid-cols-4">
           <div className="rounded-xl bg-slate-800/50 p-3">
             <p className="text-[10px] uppercase text-slate-500">Model</p>
-            <p className="font-mono text-sm text-white">{g.model || 'gemini-2.0-flash'}</p>
+            <p className="font-mono text-sm text-white">{g.model || 'gemini-flash-latest'}</p>
           </div>
           <div className="rounded-xl bg-slate-800/50 p-3">
             <p className="text-[10px] uppercase text-slate-500">Key</p>
@@ -245,22 +313,7 @@ export default function AdminPanel() {
               onChange={(e) => runImageTest(e.target.files?.[0])}
             />
           </label>
-          {testResult && (
-            <pre className="mt-3 max-h-64 overflow-auto rounded-lg bg-black/40 p-3 font-mono text-[11px] text-emerald/90">
-              {JSON.stringify(
-                {
-                  ok: testResult.ok,
-                  model: testResult.model,
-                  latencyMs: testResult.latencyMs,
-                  error: testResult.error,
-                  results: testResult.results,
-                  rawPreview: testResult.rawPreview || testResult.text?.slice?.(0, 300),
-                },
-                null,
-                2
-              )}
-            </pre>
-          )}
+          {testResult && <AnalyserPreview result={testResult} />}
         </div>
       </div>
 

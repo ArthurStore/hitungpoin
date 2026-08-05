@@ -131,6 +131,7 @@ export async function updateGeminiKey(req, res) {
     const trimmed = apiKey.trim();
     const settings = saveSettings({
       geminiApiKey: trimmed,
+      geminiModel: 'gemini-flash-latest',
       geminiLastStatus: trimmed ? 'updated' : 'missing',
       geminiLastError: '',
     });
