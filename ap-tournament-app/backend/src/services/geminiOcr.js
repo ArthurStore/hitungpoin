@@ -158,8 +158,12 @@ function extractTextFromResponse(data) {
 /**
  * REST Gemini API — MUST use snake_case field names for multimodal parts.
  * camelCase (inlineData) is silently ignored → model only sees text → returns [].
+ *
+ * JANGAN kirim thinkingConfig ke gemini-flash-latest (Gemini 3):
+ * thinkingBudget:0 → 400 "Request contains an invalid argument."
+ * Curl sederhana tanpa generationConfig ekstra tetap jalan.
  */
-async function callGeminiGenerateContent({ apiKey, model, parts, withThinkingOff = true }) {
+async function callGeminiGenerateContent({ apiKey, model, parts, useSchema = true }) {
   const prevVertex = process.env.GOOGLE_GENAI_USE_VERTEXAI;
   delete process.env.GOOGLE_GENAI_USE_VERTEXAI;
 
@@ -179,16 +183,14 @@ async function callGeminiGenerateContent({ apiKey, model, parts, withThinkingOff
     return p;
   });
 
+  // Budget besar: model latest bisa pakai thinking internal yang ikut maxOutputTokens
   const generationConfig = {
     temperature: 0.1,
     maxOutputTokens: 8192,
     responseMimeType: 'application/json',
-    responseSchema: RESULT_SCHEMA,
   };
-
-  // Thinking tokens sering menghabiskan budget → output kosong / []
-  if (withThinkingOff) {
-    generationConfig.thinkingConfig = { thinkingBudget: 0 };
+  if (useSchema) {
+    generationConfig.responseSchema = RESULT_SCHEMA;
   }
 
   try {
@@ -199,7 +201,7 @@ async function callGeminiGenerateContent({ apiKey, model, parts, withThinkingOff
         'x-goog-api-key': apiKey.trim(),
       },
       body: JSON.stringify({
-        contents: [{ role: 'user', parts: restParts }],
+        contents: [{ parts: restParts }],
         generationConfig,
       }),
     });
@@ -212,7 +214,7 @@ async function callGeminiGenerateContent({ apiKey, model, parts, withThinkingOff
       const err = new Error(reason ? `${msg} [${reason}]` : msg);
       err.status = res.status;
       err.payload = data;
-      err.retryWithoutThinking = withThinkingOff && /thinking/i.test(msg);
+      err.retryWithoutSchema = useSchema && /invalid argument|INVALID_ARGUMENT|schema/i.test(msg);
       throw err;
     }
 
@@ -244,10 +246,10 @@ function friendlyAuthError(err) {
 
 async function generateOcrContent(apiKey, model, parts) {
   try {
-    return await callGeminiGenerateContent({ apiKey, model, parts, withThinkingOff: true });
+    return await callGeminiGenerateContent({ apiKey, model, parts, useSchema: true });
   } catch (err) {
-    if (err.retryWithoutThinking) {
-      return callGeminiGenerateContent({ apiKey, model, parts, withThinkingOff: false });
+    if (err.retryWithoutSchema) {
+      return callGeminiGenerateContent({ apiKey, model, parts, useSchema: false });
     }
     throw err;
   }
@@ -352,6 +354,8 @@ export async function testGeminiConnection(apiKeyOverride) {
     const prevVertex = process.env.GOOGLE_GENAI_USE_VERTEXAI;
     delete process.env.GOOGLE_GENAI_USE_VERTEXAI;
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
+
+    // Sama seperti curl yang berhasil — tanpa thinkingConfig
     const res = await fetch(url, {
       method: 'POST',
       headers: {
@@ -359,40 +363,13 @@ export async function testGeminiConnection(apiKeyOverride) {
         'x-goog-api-key': apiKey,
       },
       body: JSON.stringify({
-        contents: [{ role: 'user', parts: [{ text: 'Reply with exactly: OK' }] }],
-        generationConfig: {
-          maxOutputTokens: 16,
-          temperature: 0,
-          thinkingConfig: { thinkingBudget: 0 },
-        },
+        contents: [{ parts: [{ text: 'Reply with exactly: OK' }] }],
       }),
     });
     const data = await res.json().catch(() => ({}));
     if (prevVertex !== undefined) process.env.GOOGLE_GENAI_USE_VERTEXAI = prevVertex;
 
     if (!res.ok) {
-      // Retry tanpa thinkingConfig jika model menolak
-      if (/thinking/i.test(data?.error?.message || '')) {
-        const res2 = await fetch(url, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-goog-api-key': apiKey,
-          },
-          body: JSON.stringify({
-            contents: [{ role: 'user', parts: [{ text: 'Reply with exactly: OK' }] }],
-            generationConfig: { maxOutputTokens: 16, temperature: 0 },
-          }),
-        });
-        const data2 = await res2.json().catch(() => ({}));
-        if (!res2.ok) {
-          const err = new Error(data2?.error?.message || `HTTP ${res2.status}`);
-          err.status = res2.status;
-          throw err;
-        }
-        const { text } = extractTextFromResponse(data2);
-        return { ok: true, latencyMs: Date.now() - started, sample: (text || '').slice(0, 40), model };
-      }
       const err = new Error(data?.error?.message || `HTTP ${res.status}`);
       err.status = res.status;
       throw err;
