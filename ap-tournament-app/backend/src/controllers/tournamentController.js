@@ -197,6 +197,70 @@ export async function updateTeams(req, res) {
   }
 }
 
+/** Create or update a single team with roster (OCR smart provisioning) */
+export async function upsertTeam(req, res) {
+  try {
+    const { id } = req.params;
+    const { name, players = [], representative, teamId } = req.body || {};
+    const teamName = String(name || '').trim();
+    if (!teamName) return res.status(400).json({ error: 'Nama tim wajib diisi' });
+
+    const roster = (Array.isArray(players) ? players : [])
+      .map((p) => (typeof p === 'string' ? { nickname: p.trim() } : { nickname: String(p.nickname || p.name || '').trim() }))
+      .filter((p) => p.nickname)
+      .slice(0, 4);
+    const rep = representative || roster[0]?.nickname || '';
+
+    if (isMemoryStore()) {
+      let team;
+      if (teamId) {
+        team = memoryStore.updateTeam(teamId, { name: teamName, players: roster, representative: rep });
+      }
+      if (!team) {
+        const existing = memoryStore.getTeams(id).find(
+          (t) => t.name.toLowerCase() === teamName.toLowerCase()
+        );
+        if (existing) {
+          team = memoryStore.updateTeam(existing._id, { name: teamName, players: roster, representative: rep });
+        } else {
+          [team] = memoryStore.createTeams([{
+            name: teamName, players: roster, representative: rep, tournamentId: id,
+          }]);
+          const t = memoryStore.getTournament(id);
+          memoryStore.updateTournament(id, { teams: [...(t.teams || []), team._id] });
+        }
+      }
+      return res.json(team);
+    }
+
+    let team = null;
+    if (teamId) {
+      team = await Team.findOneAndUpdate(
+        { _id: teamId, tournamentId: id },
+        { name: teamName, players: roster, representative: rep },
+        { new: true }
+      );
+    }
+    if (!team) {
+      team = await Team.findOne({ tournamentId: id, name: new RegExp(`^${teamName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') });
+      if (team) {
+        team.name = teamName;
+        team.players = roster;
+        team.representative = rep;
+        await team.save();
+      } else {
+        team = await Team.create({
+          name: teamName, players: roster, representative: rep, tournamentId: id,
+        });
+        await Tournament.findByIdAndUpdate(id, { $addToSet: { teams: team._id } });
+      }
+    }
+    res.json(team);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+}
+
 export async function getLeaderboard(req, res) {
   try {
     const { id } = req.params;

@@ -92,6 +92,7 @@ export const api = {
   updateTournament: (id, body) => request(`/tournaments/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
   deleteTournament: (id) => request(`/tournaments/${id}`, { method: 'DELETE' }),
   updateTeams: (id, body) => request(`/tournaments/${id}/teams`, { method: 'PUT', body: JSON.stringify(body) }),
+  upsertTeam: (id, body) => request(`/tournaments/${id}/teams/upsert`, { method: 'POST', body: JSON.stringify(body) }),
   getLeaderboard: (id) => request(`/tournaments/${id}/leaderboard`),
   submitMatchResults: (id, body) => request(`/tournaments/${id}/matches/results`, { method: 'POST', body: JSON.stringify(body) }),
   recordOcrScan: (count = 1) => request('/tournaments/ocr-scan', { method: 'POST', body: JSON.stringify({ count }) }),

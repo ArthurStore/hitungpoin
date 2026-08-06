@@ -50,6 +50,7 @@ export default function MatchInputTab() {
   const [scanning, setScanning] = useState(false);
   const [verifiedResults, setVerifiedResults] = useState([]);
   const [nicknames, setNicknames] = useState([]);
+  const [teamGroups, setTeamGroups] = useState([]);
   const [manualOpen, setManualOpen] = useState(false);
   const [startStep, setStartStep] = useState(3);
   const [submitting, setSubmitting] = useState(false);
@@ -71,6 +72,7 @@ export default function MatchInputTab() {
     setFiles(accepted);
     setVerifiedResults([]);
     setNicknames([]);
+    setTeamGroups([]);
     setLogs([]);
     setProgress(0);
     setManualOpen(false);
@@ -104,6 +106,16 @@ export default function MatchInputTab() {
       hits: 1,
       placements: [r.placement],
     })));
+    setTeamGroups(rows.map((r) => ({
+      placement: r.placement,
+      kills: r.kills,
+      nicknames: (r.players || []).map((p) => p.nickname || p).filter(Boolean).length
+        ? (r.players || []).map((p) => p.nickname || p).filter(Boolean)
+        : [r.ocrNickname || r.teamName].filter(Boolean),
+      players: r.players || [],
+      teamId: r.teamId || '',
+      teamName: r.teamName || '',
+    })));
     const shots = (match.screenshots || []).map((s) => resolveAssetUrl(s) || s);
     setPreviews(shots);
     setFiles([]);
@@ -124,6 +136,7 @@ export default function MatchInputTab() {
     setScanning(true);
     setVerifiedResults([]);
     setNicknames([]);
+    setTeamGroups([]);
     setLogs([]);
     setProgress(0);
     setManualOpen(false);
@@ -166,16 +179,21 @@ export default function MatchInputTab() {
       const matched = matchTeamsToRoster(result.entries, teams).map((r, i) => ({
         ...r,
         id: i,
-        ocrNickname: r.nickname || r.teamName,
+        ocrNickname: (r.players || []).map((p) => p.nickname || p).filter(Boolean).join(' · ')
+          || r.nickname || r.teamName,
         players: r.players || [],
         placementPoints: getDefaultPlacementPoints(r.placement, scoringRules)
           + (r.placement === 1 ? (scoringRules.booyahBonus || 0) : 0),
-        // CR League: kills field dari OCR = total score ranklist
         totalScore: inputMode === 'cr_league' ? (r.kills ?? r.totalScore ?? 0) : (r.totalScore ?? r.kills ?? 0),
       }));
 
       setVerifiedResults(matched);
       setNicknames(result.nicknames || []);
+      setTeamGroups((result.teamGroups || []).map((g, i) => ({
+        ...g,
+        teamId: matched[i]?.teamId || '',
+        teamName: matched[i]?.matchedTeamName || '',
+      })));
       setStartStep(1);
       setManualOpen(true);
       setToast({
@@ -269,6 +287,7 @@ export default function MatchInputTab() {
       setPreviews((prev) => { prev.forEach((u) => { if (u.startsWith('blob:')) URL.revokeObjectURL(u); }); return []; });
       setVerifiedResults([]);
       setNicknames([]);
+      setTeamGroups([]);
       setManualOpen(false);
       setToast({ message: 'Match results saved ke leaderboard!', type: 'success' });
     } catch (err) {
@@ -303,12 +322,14 @@ export default function MatchInputTab() {
         onClose={() => setManualOpen(false)}
         imageUrls={previews}
         teams={teams}
-        tournament={tournament}
+        tournament={{ ...tournament, inputMode }}
         initialRows={manualInitialRows}
         nicknames={nicknames}
+        teamGroups={teamGroups}
         startStep={startStep}
         onSubmit={applyResults}
         submitting={submitting}
+        onTeamsUpdated={async () => { await refresh(); }}
       />
 
       <div className="glass-panel rounded-2xl p-6">

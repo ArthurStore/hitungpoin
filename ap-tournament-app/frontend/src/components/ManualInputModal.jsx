@@ -1,12 +1,13 @@
 import { useState, useCallback, useEffect, useMemo } from 'react';
 import {
-  X, MagnifyingGlassPlus, MagnifyingGlassMinus, ArrowsOut, ArrowCounterClockwise,
-  CaretLeft, CaretRight,
+  X, MagnifyingGlassPlus, MagnifyingGlassMinus, ArrowCounterClockwise,
+  ArrowsOut, CaretLeft, CaretRight, Plus,
 } from '@phosphor-icons/react';
 import Button from './Button';
 import {
   getScoringRules, getDefaultPlacementPoints, calcLiveTotal,
 } from '../utils/pointsCalc';
+import { api } from '../utils/api';
 
 const SLOT_COUNT = 12;
 const STEPS = [
@@ -21,6 +22,14 @@ function placementPtsFor(placement, rules) {
   return base + bonus;
 }
 
+function nickListFromRow(r) {
+  const fromPlayers = (r.players || []).map((p) => p.nickname || p).filter(Boolean);
+  if (fromPlayers.length) return fromPlayers.slice(0, 4);
+  if (r.ocrNickname) return [r.ocrNickname];
+  if (r.nickname) return [r.nickname];
+  return [];
+}
+
 function buildEmptyRows(scoringRules) {
   return Array.from({ length: SLOT_COUNT }, (_, i) => {
     const placement = i + 1;
@@ -31,6 +40,8 @@ function buildEmptyRows(scoringRules) {
       ocrNickname: '',
       kills: '',
       placementPoints: placementPtsFor(placement, scoringRules),
+      players: [],
+      nicknames: [],
     };
   });
 }
@@ -128,103 +139,167 @@ export default function ManualInputModal({
   tournament,
   initialRows,
   nicknames = [],
+  teamGroups = [],
   startStep = 3,
   onSubmit,
   submitting,
+  onTeamsUpdated,
 }) {
   const scoringRules = useMemo(() => getScoringRules(tournament), [tournament]);
   const urls = imageUrls?.length ? imageUrls : (imageUrl ? [imageUrl] : []);
   const killPt = scoringRules.killPoint ?? 1;
+  const isLeague = (tournament?.inputMode || 'cr_biasa') === 'cr_league';
+  const mode = isLeague ? 'cr_league' : 'cr_biasa';
 
   const [step, setStep] = useState(startStep);
   const [rows, setRows] = useState(() => buildEmptyRows(scoringRules));
-  const [nickMap, setNickMap] = useState([]);
+  const [groupMap, setGroupMap] = useState([]);
   const [activeImg, setActiveImg] = useState(0);
   const [fullscreen, setFullscreen] = useState(false);
+  const [creatingIdx, setCreatingIdx] = useState(null);
+  const [newTeamName, setNewTeamName] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [localTeams, setLocalTeams] = useState(teams);
+  const [toastMsg, setToastMsg] = useState('');
+
+  useEffect(() => {
+    setLocalTeams(teams);
+  }, [teams]);
 
   useEffect(() => {
     if (!open) return;
     const rules = getScoringRules(tournament);
     setStep(startStep);
     setActiveImg(0);
+    setCreatingIdx(null);
+    setNewTeamName('');
+    setToastMsg('');
 
     const base = buildEmptyRows(rules);
     if (initialRows?.length) {
       initialRows.forEach((r) => {
         const idx = (r.placement || 1) - 1;
         if (idx < 0 || idx >= SLOT_COUNT) return;
+        const nicks = nickListFromRow(r);
         base[idx] = {
           ...base[idx],
           teamId: r.teamId || '',
           teamName: r.teamName || r.matchedTeamName || '',
-          ocrNickname: r.ocrNickname || r.nickname || r.teamName || '',
-          kills: r.kills ?? '',
+          ocrNickname: nicks.join(' · ') || r.ocrNickname || r.nickname || r.teamName || '',
+          kills: r.kills ?? r.totalScore ?? '',
           placementPoints: r.placementPoints != null
             ? r.placementPoints
             : placementPtsFor(r.placement || idx + 1, rules),
-          players: r.players || [],
+          players: r.players || nicks.map((n) => ({ nickname: n })),
+          nicknames: nicks,
         };
       });
     }
     setRows(base);
 
-    const nicks = nicknames.length
-      ? nicknames
-      : (initialRows || [])
-        .filter((r) => r.teamName || r.nickname)
-        .map((r) => ({
-          nickname: r.nickname || r.teamName,
-          kills: r.kills || 0,
-          placements: r.placement ? [r.placement] : [],
-        }));
-
-    setNickMap(nicks.map((n) => {
-      const matched = teams.find((t) => {
-        const a = t.name.toLowerCase().replace(/[^a-z0-9]/g, '');
-        const b = (n.nickname || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-        return a && b && (a === b || a.includes(b) || b.includes(a));
+    // Build team groups: 4 nicknames = 1 unit (never split per-player)
+    let groups = [];
+    if (teamGroups?.length) {
+      groups = teamGroups.map((g) => ({
+        placement: g.placement,
+        kills: g.kills || 0,
+        nicknames: g.nicknames || (g.players || []).map((p) => p.nickname || p).filter(Boolean),
+        players: g.players || [],
+        teamId: '',
+        teamName: '',
+        draftName: '',
+      }));
+    } else if (initialRows?.length) {
+      groups = initialRows
+        .filter((r) => r.placement || r.nickname || r.teamName || (r.players || []).length)
+        .map((r) => {
+          const nicks = nickListFromRow(r);
+          return {
+            placement: r.placement,
+            kills: r.kills || 0,
+            nicknames: nicks,
+            players: r.players || nicks.map((n) => ({ nickname: n })),
+            teamId: r.teamId || '',
+            teamName: r.teamName || r.matchedTeamName || '',
+            draftName: '',
+          };
+        });
+    } else if (nicknames?.length) {
+      // Legacy flat nicknames → group by placement
+      const byPlace = new Map();
+      nicknames.forEach((n) => {
+        const place = n.placements?.[0] || 0;
+        if (!byPlace.has(place)) byPlace.set(place, { placement: place || null, kills: 0, nicknames: [], players: [] });
+        const g = byPlace.get(place);
+        g.nicknames.push(n.nickname);
+        g.players.push({ nickname: n.nickname, kills: n.kills || 0 });
+        g.kills = Math.max(g.kills, n.kills || 0);
       });
-      const fromRow = (initialRows || []).find(
-        (r) => (r.nickname || r.teamName || '').toLowerCase() === (n.nickname || '').toLowerCase()
-      );
-      return {
-        nickname: n.nickname,
-        kills: n.kills || 0,
-        placements: n.placements || [],
-        teamId: fromRow?.teamId || matched?._id || '',
-        teamName: fromRow?.teamName || matched?.name || '',
-      };
-    }));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, initialRows, nicknames, startStep, teams, tournament]);
+      groups = Array.from(byPlace.values());
+    }
 
-  const applyNickMapToRows = () => {
+    // Auto-match each group to roster by nickname overlap
+    const matchedGroups = groups.map((g) => {
+      if (g.teamId) return g;
+      const ocrNorms = g.nicknames.map((n) => n.toLowerCase().replace(/[^a-z0-9]/g, '')).filter(Boolean);
+      let best = null;
+      let bestScore = 0;
+      localTeams.forEach((t) => {
+        const roster = (t.players || []).map((p) => (p.nickname || '').toLowerCase().replace(/[^a-z0-9]/g, '')).filter(Boolean);
+        const nameNorm = t.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+        let score = 0;
+        const hits = ocrNorms.filter((n) => roster.some((r) => r === n || (r.length > 2 && (r.includes(n) || n.includes(r))))).length;
+        if (hits > 0) score = 70 + hits * 10;
+        if (nameNorm && ocrNorms.some((n) => n === nameNorm || n.includes(nameNorm))) score = Math.max(score, 90);
+        if (score > bestScore) { bestScore = score; best = t; }
+      });
+      return {
+        ...g,
+        teamId: best?._id || '',
+        teamName: best?.name || '',
+      };
+    });
+    setGroupMap(matchedGroups);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, initialRows, nicknames, teamGroups, startStep, tournament]);
+
+  // Re-match when teams list grows (after create)
+  useEffect(() => {
+    if (!open || !localTeams.length) return;
+    setGroupMap((prev) => prev.map((g) => {
+      if (g.teamId) return g;
+      const ocrNorms = (g.nicknames || []).map((n) => n.toLowerCase().replace(/[^a-z0-9]/g, '')).filter(Boolean);
+      let best = null;
+      let bestScore = 0;
+      localTeams.forEach((t) => {
+        const roster = (t.players || []).map((p) => (p.nickname || '').toLowerCase().replace(/[^a-z0-9]/g, '')).filter(Boolean);
+        const hits = ocrNorms.filter((n) => roster.some((r) => r === n || (r.length > 2 && (r.includes(n) || n.includes(r))))).length;
+        if (hits > bestScore) { bestScore = hits; best = t; }
+      });
+      if (!best) return g;
+      return { ...g, teamId: best._id, teamName: best.name };
+    }));
+  }, [localTeams, open]);
+
+  const applyGroupMapToRows = () => {
     setRows((prev) => {
       const next = prev.map((r) => ({ ...r }));
-      nickMap.forEach((n) => {
-        if (!n.teamId) return;
-        const team = teams.find((t) => t._id === n.teamId);
-        const place = n.placements?.[0];
+      groupMap.forEach((g) => {
+        if (!g.teamId && !g.teamName) return;
+        const team = localTeams.find((t) => t._id === g.teamId);
+        const place = g.placement;
         if (place && place >= 1 && place <= 12) {
           const idx = place - 1;
+          const nicks = g.nicknames || [];
           next[idx] = {
             ...next[idx],
-            teamId: n.teamId,
-            teamName: team?.name || n.teamName,
-            ocrNickname: n.nickname,
-            kills: next[idx].kills !== '' ? next[idx].kills : (n.kills || ''),
+            teamId: g.teamId,
+            teamName: team?.name || g.teamName,
+            ocrNickname: nicks.join(' · '),
+            nicknames: nicks,
+            players: g.players || nicks.map((n) => ({ nickname: n })),
+            kills: next[idx].kills !== '' ? next[idx].kills : (g.kills || ''),
           };
-        } else {
-          const empty = next.findIndex((r) => !r.teamId);
-          if (empty >= 0) {
-            next[empty] = {
-              ...next[empty],
-              teamId: n.teamId,
-              teamName: team?.name || n.teamName,
-              ocrNickname: n.nickname,
-              kills: n.kills || '',
-            };
-          }
         }
       });
       return next;
@@ -240,10 +315,45 @@ export default function ManualInputModal({
   };
 
   const onTeamSelect = (idx, teamId) => {
-    const team = teams.find((t) => t._id === teamId);
+    const team = localTeams.find((t) => t._id === teamId);
     setRows((prev) => prev.map((r, i) =>
       i === idx ? { ...r, teamId, teamName: team?.name || '' } : r
     ));
+  };
+
+  const createTeamFromGroup = async (groupIdx) => {
+    const g = groupMap[groupIdx];
+    const name = (g.draftName || newTeamName || '').trim();
+    if (!name) {
+      setToastMsg('Isi nama tim dulu (mis. EXC)');
+      return;
+    }
+    if (!tournament?._id) return;
+    setCreating(true);
+    setToastMsg('');
+    try {
+      const players = (g.nicknames || []).slice(0, 4).map((n) => ({ nickname: n }));
+      const team = await api.upsertTeam(tournament._id, {
+        name,
+        players,
+        representative: players[0]?.nickname || '',
+      });
+      setLocalTeams((prev) => {
+        const exists = prev.some((t) => t._id === team._id);
+        return exists ? prev.map((t) => (t._id === team._id ? team : t)) : [...prev, team];
+      });
+      setGroupMap((prev) => prev.map((row, j) =>
+        j === groupIdx ? { ...row, teamId: team._id, teamName: team.name, draftName: '' } : row
+      ));
+      setCreatingIdx(null);
+      setNewTeamName('');
+      setToastMsg(`Tim "${team.name}" dibuat + roster ${players.length} nick`);
+      await onTeamsUpdated?.(team);
+    } catch (err) {
+      setToastMsg(err.message || 'Gagal buat tim');
+    } finally {
+      setCreating(false);
+    }
   };
 
   const filledRows = useMemo(
@@ -253,7 +363,7 @@ export default function ManualInputModal({
 
   const goNext = () => {
     if (step === 1) {
-      applyNickMapToRows();
+      applyGroupMapToRows();
       setStep(2);
     } else if (step === 2) {
       setStep(3);
@@ -263,24 +373,28 @@ export default function ManualInputModal({
   const handleSubmit = () => {
     const payload = filledRows.map((r) => {
       const kills = parseInt(r.kills, 10) || 0;
-      const placementPoints = r.placementPoints != null && r.placementPoints !== ''
-        ? parseInt(r.placementPoints, 10) || 0
-        : placementPtsFor(r.placement, scoringRules);
+      const placementPoints = isLeague
+        ? 0
+        : (r.placementPoints != null && r.placementPoints !== ''
+          ? parseInt(r.placementPoints, 10) || 0
+          : placementPtsFor(r.placement, scoringRules));
       const total = calcLiveTotal({
         placement: r.placement,
         kills,
         placementPoints,
-        mode: 'cr_biasa',
+        mode,
         scoringRules,
       });
+      const nicks = r.nicknames?.length ? r.nicknames : nickListFromRow(r);
       return {
         ...r,
         kills,
         placementPoints,
         totalPoints: total,
         totalScore: kills,
-        ocrNickname: r.ocrNickname || r.nickname || '',
-        players: r.players || [],
+        ocrNickname: nicks.join(' · ') || r.ocrNickname || '',
+        players: r.players?.length ? r.players : nicks.map((n) => ({ nickname: n })),
+        nicknames: nicks,
       };
     });
     onSubmit(payload);
@@ -298,7 +412,7 @@ export default function ManualInputModal({
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 px-4 py-3">
           <div>
             <h2 className="font-bold text-white">
-              {step === 1 ? 'Step 1 · Roster / Nickname Matching' :
+              {step === 1 ? 'Step 1 · Roster / Tim Matching' :
                step === 2 ? 'Step 2 · Match Scores Preview' :
                'Step 3 · Adjust & Submit'}
             </h2>
@@ -335,47 +449,102 @@ export default function ManualInputModal({
 
           <div className="flex flex-1 flex-col overflow-hidden">
             <div className="flex-1 overflow-y-auto p-4">
+              {toastMsg && (
+                <p className="mb-3 rounded-lg bg-emerald/15 px-3 py-2 text-xs text-emerald">{toastMsg}</p>
+              )}
+
               {step === 1 && (
                 <div className="space-y-3">
-                  <p className="text-xs text-slate-400">Konfirmasi nickname OCR → tim terdaftar.</p>
-                  {nickMap.length === 0 ? (
-                    <p className="rounded-xl bg-slate-800/50 p-4 text-sm text-slate-500">Tidak ada nickname. Lanjut ke Step 3 untuk input manual.</p>
+                  <p className="text-xs text-slate-400">
+                    Setiap baris = <strong className="text-white">1 tim (hingga 4 nickname)</strong>.
+                    Pilih tim terdaftar atau buat tim baru langsung di sini — roster otomatis terisi.
+                  </p>
+                  {groupMap.length === 0 ? (
+                    <p className="rounded-xl bg-slate-800/50 p-4 text-sm text-slate-500">
+                      Tidak ada hasil OCR. Lanjut ke Step 3 untuk input manual.
+                    </p>
                   ) : (
-                    <div className="overflow-x-auto rounded-xl border border-white/5">
-                      <table className="w-full text-left text-sm">
-                        <thead>
-                          <tr className="border-b border-white/10 text-[10px] uppercase text-slate-500">
-                            <th className="px-3 py-2">OCR Nickname</th>
-                            <th className="px-3 py-2">Kills</th>
-                            <th className="px-3 py-2">Rank</th>
-                            <th className="px-3 py-2">Map ke Tim</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {nickMap.map((n, i) => (
-                            <tr key={i} className="border-b border-white/5">
-                              <td className="px-3 py-2 font-mono text-xs text-cyan-300">{n.nickname}</td>
-                              <td className="px-3 py-2 font-mono text-white">{n.kills}</td>
-                              <td className="px-3 py-2 font-mono text-slate-400">{n.placements?.[0] ? `#${n.placements[0]}` : '—'}</td>
-                              <td className="px-3 py-2">
-                                <select
-                                  value={n.teamId}
-                                  onChange={(e) => {
-                                    const team = teams.find((t) => t._id === e.target.value);
-                                    setNickMap((prev) => prev.map((row, j) =>
-                                      j === i ? { ...row, teamId: e.target.value, teamName: team?.name || '' } : row
-                                    ));
-                                  }}
-                                  className="w-full rounded-lg border border-white/10 bg-slate-900 px-2 py-1.5 text-sm text-white"
+                    <div className="space-y-3">
+                      {groupMap.map((g, i) => (
+                        <div key={i} className="rounded-xl border border-white/10 bg-slate-800/40 p-3">
+                          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                            <span className="text-xs font-bold text-amber-300">
+                              #{g.placement || '—'} · {g.kills} {isLeague ? 'score' : 'kills'}
+                            </span>
+                            {g.teamId && (
+                              <span className="rounded-full bg-emerald/20 px-2 py-0.5 text-[10px] font-bold text-emerald">
+                                → {g.teamName}
+                              </span>
+                            )}
+                          </div>
+                          <div className="mb-3 flex flex-wrap gap-1.5">
+                            {(g.nicknames || []).length === 0 ? (
+                              <span className="text-xs text-slate-500">—</span>
+                            ) : (
+                              (g.nicknames || []).map((n, ni) => (
+                                <span
+                                  key={ni}
+                                  className="rounded-md border border-cyan-500/30 bg-cyan-500/10 px-2 py-1 font-mono text-[11px] text-cyan-300"
                                 >
-                                  <option value="">— Unmatched —</option>
-                                  {teams.map((t) => <option key={t._id} value={t._id}>{t.name}</option>)}
-                                </select>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                                  {n}
+                                </span>
+                              ))
+                            )}
+                          </div>
+                          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                            <select
+                              value={g.teamId}
+                              onChange={(e) => {
+                                const team = localTeams.find((t) => t._id === e.target.value);
+                                setGroupMap((prev) => prev.map((row, j) =>
+                                  j === i ? { ...row, teamId: e.target.value, teamName: team?.name || '' } : row
+                                ));
+                              }}
+                              className="flex-1 rounded-lg border border-white/10 bg-slate-900 px-2 py-1.5 text-sm text-white"
+                            >
+                              <option value="">— Pilih / buat tim —</option>
+                              {localTeams.map((t) => (
+                                <option key={t._id} value={t._id}>{t.name}</option>
+                              ))}
+                            </select>
+                            {creatingIdx === i ? (
+                              <div className="flex flex-1 gap-1">
+                                <input
+                                  type="text"
+                                  value={g.draftName || ''}
+                                  onChange={(e) => setGroupMap((prev) => prev.map((row, j) =>
+                                    j === i ? { ...row, draftName: e.target.value } : row
+                                  ))}
+                                  placeholder="Nama tim (EXC)"
+                                  className="min-w-0 flex-1 rounded-lg border border-emerald/40 bg-slate-900 px-2 py-1.5 text-sm text-white"
+                                  autoFocus
+                                />
+                                <Button
+                                  variant="success"
+                                  onClick={() => createTeamFromGroup(i)}
+                                  loading={creating}
+                                  disabled={creating}
+                                >
+                                  Simpan
+                                </Button>
+                                <Button variant="ghost" onClick={() => setCreatingIdx(null)}>Batal</Button>
+                              </div>
+                            ) : (
+                              <Button
+                                variant="secondary"
+                                onClick={() => {
+                                  setCreatingIdx(i);
+                                  setGroupMap((prev) => prev.map((row, j) =>
+                                    j === i ? { ...row, draftName: row.draftName || '' } : row
+                                  ));
+                                }}
+                              >
+                                <Plus size={14} /> Buat Tim Baru dari OCR
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   )}
                 </div>
@@ -384,8 +553,17 @@ export default function ManualInputModal({
               {(step === 2 || step === 3) && (
                 <div className="space-y-2">
                   <p className="mb-2 text-xs text-slate-400">
-                    Input hanya <strong className="text-white">Kills</strong>. Placement Pts & Total dihitung otomatis:
-                    {' '}<span className="font-mono text-emerald">Total = Kills × {killPt} + PlacementPts</span>
+                    {isLeague ? (
+                      <>
+                        Mode CR League: input <strong className="text-white">SCORE</strong> saja.
+                        Angka tersebut langsung jadi Total (tanpa Place Pts).
+                      </>
+                    ) : (
+                      <>
+                        Input hanya <strong className="text-white">Kills</strong>. Placement Pts & Total dihitung otomatis:
+                        {' '}<span className="font-mono text-emerald">Total = Kills × {killPt} + PlacementPts</span>
+                      </>
+                    )}
                   </p>
                   <div className="overflow-x-auto rounded-xl border border-white/5">
                     <table className="w-full min-w-[560px] text-left text-sm">
@@ -393,8 +571,8 @@ export default function ManualInputModal({
                         <tr className="border-b border-white/10 bg-slate-800/40 text-[10px] uppercase tracking-wider text-slate-500">
                           <th className="w-16 px-2 py-2">Rank</th>
                           <th className="px-2 py-2">Nick / Team</th>
-                          <th className="w-20 px-2 py-2">Kills</th>
-                          <th className="w-24 px-2 py-2">Place Pts</th>
+                          <th className="w-20 px-2 py-2">{isLeague ? 'Score' : 'Kills'}</th>
+                          {!isLeague && <th className="w-24 px-2 py-2">Place Pts</th>}
                           <th className="w-16 px-2 py-2 text-right">Total</th>
                         </tr>
                       </thead>
@@ -407,13 +585,13 @@ export default function ManualInputModal({
                             ? calcLiveTotal({
                               placement: row.placement,
                               kills: row.kills,
-                              placementPoints: pp,
-                              mode: 'cr_biasa',
+                              placementPoints: isLeague ? 0 : pp,
+                              mode,
                               scoringRules,
                             })
                             : '—';
                           const editable = step === 3;
-                          const playersBackup = (row.players || []).map((p) => p.nickname || p).filter(Boolean).join(', ');
+                          const nicks = row.nicknames?.length ? row.nicknames : nickListFromRow(row);
 
                           return (
                             <tr
@@ -443,34 +621,41 @@ export default function ManualInputModal({
                               <td className="px-2 py-1.5">
                                 {editable ? (
                                   <div className="space-y-1">
-                                    <input
-                                      type="text"
-                                      value={row.ocrNickname || ''}
-                                      onChange={(e) => updateField(idx, 'ocrNickname', e.target.value)}
-                                      placeholder="Nick OCR"
-                                      className="w-full rounded-lg border border-white/10 bg-slate-900 px-2 py-1 text-xs text-cyan-300"
-                                    />
+                                    <div className="flex flex-wrap gap-1">
+                                      {nicks.length ? nicks.map((n, ni) => (
+                                        <span key={ni} className="rounded bg-cyan-500/15 px-1.5 py-0.5 font-mono text-[10px] text-cyan-300">
+                                          {n}
+                                        </span>
+                                      )) : (
+                                        <input
+                                          type="text"
+                                          value={row.ocrNickname || ''}
+                                          onChange={(e) => updateField(idx, 'ocrNickname', e.target.value)}
+                                          placeholder="Nick OCR"
+                                          className="w-full rounded-lg border border-white/10 bg-slate-900 px-2 py-1 text-xs text-cyan-300"
+                                        />
+                                      )}
+                                    </div>
                                     <select
                                       value={row.teamId}
                                       onChange={(e) => onTeamSelect(idx, e.target.value)}
                                       className="w-full min-w-[110px] rounded-lg border border-white/10 bg-slate-900 px-2 py-1.5 text-xs text-white"
                                     >
                                       <option value="">Select Team</option>
-                                      {teams.map((t) => <option key={t._id} value={t._id}>{t.name}</option>)}
+                                      {localTeams.map((t) => <option key={t._id} value={t._id}>{t.name}</option>)}
                                     </select>
-                                    {playersBackup && (
-                                      <p className="truncate text-[9px] text-slate-500" title={playersBackup}>
-                                        Roster: {playersBackup}
-                                      </p>
-                                    )}
                                   </div>
                                 ) : (
                                   <div>
                                     <span className="text-xs font-semibold text-white">
                                       {row.teamName || <span className="text-slate-600">—</span>}
                                     </span>
-                                    {row.ocrNickname && (
-                                      <p className="text-[10px] text-cyan-400/80">{row.ocrNickname}</p>
+                                    {nicks.length > 0 && (
+                                      <p className="mt-0.5 flex flex-wrap gap-1">
+                                        {nicks.map((n, ni) => (
+                                          <span key={ni} className="rounded bg-slate-800 px-1 text-[9px] text-cyan-400/80">{n}</span>
+                                        ))}
+                                      </p>
                                     )}
                                   </div>
                                 )}
@@ -489,18 +674,20 @@ export default function ManualInputModal({
                                   <span className="font-mono text-white">{row.kills === '' ? '—' : row.kills}</span>
                                 )}
                               </td>
-                              <td className="px-2 py-1.5">
-                                {editable ? (
-                                  <input
-                                    type="number"
-                                    value={pp}
-                                    onChange={(e) => updateField(idx, 'placementPoints', e.target.value)}
-                                    className={inputCls}
-                                  />
-                                ) : (
-                                  <span className="font-mono text-slate-300">{pp}</span>
-                                )}
-                              </td>
+                              {!isLeague && (
+                                <td className="px-2 py-1.5">
+                                  {editable ? (
+                                    <input
+                                      type="number"
+                                      value={pp}
+                                      onChange={(e) => updateField(idx, 'placementPoints', e.target.value)}
+                                      className={inputCls}
+                                    />
+                                  ) : (
+                                    <span className="font-mono text-slate-300">{pp}</span>
+                                  )}
+                                </td>
+                              )}
                               <td className="px-2 py-1.5 text-right font-mono text-sm font-bold text-emerald">{liveTotal}</td>
                             </tr>
                           );

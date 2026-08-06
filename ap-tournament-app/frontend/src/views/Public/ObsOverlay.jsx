@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { io } from 'socket.io-client';
-import { api, resolveAssetUrl, API_BASE } from '../../utils/api';
+import { api, API_BASE } from '../../utils/api';
 import { MatchTreeHeaders, MatchScoreCells, matchColumnCount } from '../../components/MatchTreeHeaders';
 
 function socketOrigin() {
@@ -104,21 +104,13 @@ export default function ObsOverlay() {
       </div>
 
       <div className="relative z-10 flex h-full flex-col px-6 py-5">
-        {/* No tournament logo — LIVE SCORE + Free Fire mark only */}
+        {/* No logos — text-only LIVE SCORE header */}
         <header className="mb-3 flex items-center justify-between border-b border-cyan-400/35 pb-3">
-          <div className="flex items-center gap-3">
-            <img
-              src="/free-fire-logo.png"
-              alt="Free Fire"
-              className="h-12 w-16 object-contain"
-              style={{ background: 'transparent' }}
-            />
-            <div>
-              <h1 className="font-display text-3xl font-black uppercase tracking-[0.2em] text-white drop-shadow-[0_0_14px_#22d3ee]">
-                LIVE SCORE
-              </h1>
-              <p className="text-xs uppercase tracking-[0.3em] text-fuchsia-300/80">{tournament.name}</p>
-            </div>
+          <div>
+            <h1 className="font-display text-3xl font-black uppercase tracking-[0.2em] text-white drop-shadow-[0_0_14px_#22d3ee]">
+              LIVE SCORE
+            </h1>
+            <p className="text-xs uppercase tracking-[0.3em] text-fuchsia-300/80">{tournament.name}</p>
           </div>
           <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-bold ${connected ? 'bg-emerald/20 text-emerald' : 'bg-white/10 text-white/50'}`}>
             <span className={`h-2 w-2 rounded-full ${connected ? 'bg-emerald animate-pulse' : 'bg-white/40'}`} />
@@ -128,10 +120,9 @@ export default function ObsOverlay() {
 
         <div
           className="mb-2 grid items-end gap-1"
-          style={{ gridTemplateColumns: `36px 36px minmax(0,1.5fr) repeat(${matchCols}, minmax(0,1fr)) 56px` }}
+          style={{ gridTemplateColumns: `40px minmax(0,1.6fr) repeat(${matchCols}, minmax(0,1fr)) 56px` }}
         >
           <span className="pb-1 text-[10px] font-bold text-cyan-200/60">#</span>
-          <span />
           <span className="pb-1 text-[10px] font-bold uppercase text-cyan-200/60">Team</span>
           <MatchTreeHeaders matchNumbers={matchNumbers} mode={mode} />
           <span className="pb-1 text-right text-[10px] font-bold text-cyan-200/60">TOTAL</span>
@@ -145,7 +136,7 @@ export default function ObsOverlay() {
                 key={`${team.teamId || team.teamName}-${tick}`}
                 className="grid items-center gap-1 rounded-lg border border-cyan-400/25 bg-black/55 px-2 py-2 backdrop-blur-md"
                 style={{
-                  gridTemplateColumns: `36px 36px minmax(0,1.5fr) repeat(${matchCols}, minmax(0,1fr)) 56px`,
+                  gridTemplateColumns: `40px minmax(0,1.6fr) repeat(${matchCols}, minmax(0,1fr)) 56px`,
                   animation: `${animName} 0.55s ease-out both`,
                   animationDelay: `${idx * 0.08}s`,
                   boxShadow: team.rank <= 3 ? '0 0 16px rgba(34,211,238,0.22)' : 'none',
@@ -154,11 +145,6 @@ export default function ObsOverlay() {
                 <span className={`font-display text-lg font-black ${team.rank <= 3 ? 'text-amber-300' : 'text-white/85'}`}>
                   {team.rank}
                 </span>
-                {team.logo ? (
-                  <img src={resolveAssetUrl(team.logo)} alt="" className="h-8 w-8 object-contain" style={{ background: 'transparent' }} />
-                ) : (
-                  <span className="text-center text-xs text-white/30">{(team.teamName || '?')[0]}</span>
-                )}
                 <p className="truncate font-display text-base font-bold uppercase tracking-wide text-white">
                   {team.teamName}
                 </p>

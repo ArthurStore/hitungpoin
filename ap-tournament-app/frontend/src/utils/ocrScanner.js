@@ -130,9 +130,10 @@ export async function scanMultiPass(dataUrls, mode, onLog, onProgress) {
 
   const merged = mergeMultiPassResults(allParsed);
   const nicknames = extractNicknameList(allParsed);
-  onLog?.(`Merge: ${merged.length} placements, ${nicknames.length} nicknames`);
+  const teamGroups = extractTeamGroups(merged);
+  onLog?.(`Merge: ${merged.length} tim/placement, ${teamGroups.reduce((s, g) => s + g.nicknames.length, 0)} nicknames`);
   onProgress?.(100);
-  return { success: true, entries: merged, nicknames, errors };
+  return { success: true, entries: merged, nicknames, teamGroups, errors };
 }
 
 export function mergeMultiPassResults(allParsed) {
@@ -158,11 +159,60 @@ export function mergeMultiPassResults(allParsed) {
     });
     const bestName = Object.entries(nameVotes).sort((a, b) => b[1] - a[1])[0]?.[0] || '';
     const bestKills = parseInt(Object.entries(killVotes).sort((a, b) => b[1] - a[1])[0]?.[0] || '0', 10);
+    const players = mergePlayersFromGroup(group);
     merged.push({
-      placement: p, rank: p, teamName: bestName, nickname: bestName, kills: bestKills, votes: group.length,
+      placement: p,
+      rank: p,
+      teamName: bestName,
+      nickname: bestName,
+      kills: bestKills,
+      votes: group.length,
+      players,
     });
   }
   return merged;
+}
+
+function mergePlayersFromGroup(group) {
+  const byNick = new Map();
+  group.forEach((g) => {
+    const list = Array.isArray(g.players) && g.players.length
+      ? g.players
+      : [{ nickname: g.nickname || g.teamName || '', kills: g.kills || 0 }];
+    list.forEach((p) => {
+      const nick = String(p.nickname || p.name || p || '').trim();
+      if (!nick || nick.length < 2) return;
+      const key = nick.toLowerCase();
+      const prev = byNick.get(key) || { nickname: nick, kills: 0 };
+      prev.kills = Math.max(prev.kills, parseInt(p.kills, 10) || 0);
+      byNick.set(key, prev);
+    });
+  });
+  return Array.from(byNick.values()).slice(0, 4);
+}
+
+/** One entry per placement: 4 nicknames as a single team unit */
+export function extractTeamGroups(entries) {
+  return (entries || [])
+    .filter((r) => (r.placement || r.rank) >= 1)
+    .map((r) => {
+      const players = (r.players || [])
+        .map((p) => (typeof p === 'string' ? { nickname: p } : p))
+        .filter((p) => p.nickname)
+        .slice(0, 4);
+      const nicknames = players.length
+        ? players.map((p) => p.nickname)
+        : [r.nickname || r.teamName].filter(Boolean);
+      return {
+        placement: r.placement || r.rank,
+        kills: r.kills ?? 0,
+        teamName: r.teamName || '',
+        nickname: r.nickname || nicknames[0] || '',
+        nicknames,
+        players: nicknames.map((n, i) => players[i] || { nickname: n, kills: 0 }),
+      };
+    })
+    .sort((a, b) => a.placement - b.placement);
 }
 
 export function extractNicknameList(allParsed) {
@@ -187,23 +237,41 @@ export function extractNicknameList(allParsed) {
   return Array.from(map.values()).sort((a, b) => b.hits - a.hits);
 }
 
+function normNick(s) {
+  return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
 export function matchTeamsToRoster(ocrResults, registeredTeams) {
   return ocrResults.map((ocr) => {
-    const normalized = (ocr.teamName || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const ocrNicks = [
+      ...(ocr.players || []).map((p) => normNick(p.nickname || p)),
+      normNick(ocr.nickname),
+      normNick(ocr.teamName),
+    ].filter(Boolean);
+
     let bestMatch = null;
     let bestScore = 0;
 
-    registeredTeams.forEach((team) => {
-      const teamNorm = team.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+    (registeredTeams || []).forEach((team) => {
+      const teamNorm = normNick(team.name);
+      const rosterNicks = (team.players || [])
+        .map((p) => normNick(p.nickname || p.name || p))
+        .filter(Boolean);
+
       let score = 0;
-      if (teamNorm === normalized) score = 100;
-      else if (teamNorm.includes(normalized) || normalized.includes(teamNorm)) score = 75;
-      else {
-        team.name.toLowerCase().split(/\s+/).forEach((w) => {
-          if (w.length > 2 && normalized.includes(w.replace(/[^a-z0-9]/g, ''))) score += 25;
-        });
+      if (teamNorm && ocrNicks.some((n) => n === teamNorm)) score = 100;
+      else if (teamNorm && ocrNicks.some((n) => n.includes(teamNorm) || teamNorm.includes(n))) score = 75;
+
+      // Reverse auto-match: OCR nick found in saved roster
+      const rosterHits = ocrNicks.filter((n) =>
+        rosterNicks.some((r) => r === n || (r.length > 2 && n.length > 2 && (r.includes(n) || n.includes(r))))
+      ).length;
+      if (rosterHits > 0) score = Math.max(score, 70 + Math.min(rosterHits, 4) * 10);
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestMatch = team;
       }
-      if (score > bestScore) { bestScore = score; bestMatch = team; }
     });
 
     return {
@@ -214,3 +282,4 @@ export function matchTeamsToRoster(ocrResults, registeredTeams) {
     };
   });
 }
+

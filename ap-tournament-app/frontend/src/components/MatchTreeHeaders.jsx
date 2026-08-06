@@ -1,7 +1,7 @@
 /**
  * Tree/branch match column headers.
- * CR Biasa: MATCH n → PTS | KILL
- * CR League: MATCH n → TOTAL SCORE (single column)
+ * CR Biasa: MATCH n → PTS | KILL (wide branch spanning both columns)
+ * CR League: MATCH n → TOTAL
  */
 export function matchColumnCount(totalMatches, mode) {
   return mode === 'cr_league' ? totalMatches : totalMatches * 2;
@@ -23,7 +23,7 @@ export function MatchTreeHeaders({ matchNumbers, mode, compact = false }) {
         className="flex flex-col items-center justify-end border-r border-white/10 px-0.5 pb-0.5 last:border-r-0"
       >
         <span className={titleCls}>MATCH {n}</span>
-        <div className="mt-0.5 h-px w-3/4 bg-gradient-to-r from-transparent via-amber-400/60 to-transparent" />
+        <div className="mt-0.5 h-px w-full bg-gradient-to-r from-transparent via-amber-400/70 to-transparent" />
         <span className={`${labelCls} mt-0.5 text-emerald-300/90`}>TOTAL</span>
       </div>
     ));
@@ -32,16 +32,16 @@ export function MatchTreeHeaders({ matchNumbers, mode, compact = false }) {
   return matchNumbers.map((n) => (
     <div
       key={n}
-      className="col-span-2 flex flex-col items-center border-r border-white/15 px-0.5 pb-0.5 last:border-r-0"
+      className="col-span-2 flex w-full flex-col items-center border-r border-white/15 px-0.5 pb-0.5 last:border-r-0"
     >
       <span className={titleCls}>MATCH {n}</span>
-      {/* Branching tree lines */}
-      <svg viewBox="0 0 40 10" className="mt-0.5 h-2.5 w-full max-w-[52px]" aria-hidden>
+      <svg viewBox="0 0 100 12" className="mt-0.5 h-3 w-full" preserveAspectRatio="none" aria-hidden>
         <path
-          d="M20 0 V4 M20 4 H8 M20 4 H32 M8 4 V9 M32 4 V9"
+          d="M50 0 V5 M50 5 H12 M50 5 H88 M12 5 V11 M88 5 V11"
           fill="none"
-          stroke="rgba(251,191,36,0.55)"
-          strokeWidth="1.2"
+          stroke="rgba(251,191,36,0.7)"
+          strokeWidth="1.5"
+          vectorEffect="non-scaling-stroke"
         />
       </svg>
       <div className="grid w-full grid-cols-2 gap-0.5 text-center">

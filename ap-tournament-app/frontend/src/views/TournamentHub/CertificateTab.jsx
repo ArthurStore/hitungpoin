@@ -244,11 +244,22 @@ export default function CertificateTab() {
     setDragging(key);
   };
 
+  const onExtraLogoPointerDown = (e) => {
+    if (!extraLogo.enabled || !extraLogo.url) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setDragging('__extraLogo');
+  };
+
   const onPointerMove = useCallback((e) => {
     if (!dragging || !canvasRef.current) return;
     const rect = canvasRef.current.getBoundingClientRect();
     const x = Math.min(95, Math.max(5, ((e.clientX - rect.left) / rect.width) * 100));
     const y = Math.min(95, Math.max(5, ((e.clientY - rect.top) / rect.height) * 100));
+    if (dragging === '__extraLogo') {
+      setExtraLogo((prev) => ({ ...prev, x, y }));
+      return;
+    }
     setPlaceholders((prev) => ({
       ...prev,
       [dragging]: { ...prev[dragging], x, y },
@@ -389,19 +400,30 @@ export default function CertificateTab() {
               <div className="flex h-full items-center justify-center text-sm text-slate-600">Belum ada template</div>
             )}
             {extraLogo.enabled && extraLogo.url && (
-              <img
-                src={resolveAssetUrl(extraLogo.url)}
-                alt=""
-                className="pointer-events-none absolute z-[5] object-contain"
+              <button
+                type="button"
+                onPointerDown={onExtraLogoPointerDown}
+                className={`absolute z-[5] cursor-grab border-2 object-contain active:cursor-grabbing ${
+                  dragging === '__extraLogo' ? 'border-emerald' : 'border-transparent hover:border-white/40'
+                }`}
                 style={{
                   left: `${extraLogo.x}%`,
                   top: `${extraLogo.y}%`,
                   width: `${extraLogo.size}%`,
                   transform: 'translate(-50%, -50%)',
                   background: 'transparent',
+                  padding: 0,
                 }}
-                draggable={false}
-              />
+                title="Geser logo dengan mouse"
+              >
+                <img
+                  src={resolveAssetUrl(extraLogo.url)}
+                  alt=""
+                  className="pointer-events-none h-auto w-full object-contain"
+                  style={{ background: 'transparent' }}
+                  draggable={false}
+                />
+              </button>
             )}
             {Object.entries(placeholders).filter(([, pos]) => pos.enabled).map(([key, pos]) => (
               <button
@@ -482,34 +504,24 @@ export default function CertificateTab() {
                 Tampilkan logo di sertifikat
               </label>
               {extraLogo.url && (
-                <img src={resolveAssetUrl(extraLogo.url)} alt="Extra logo" className="h-12 w-12 object-contain" style={{ background: 'transparent' }} />
+                <p className="text-[11px] text-slate-400">
+                  Geser logo langsung di preview canvas. Ukuran:
+                </p>
               )}
-              <div className="grid grid-cols-3 gap-2">
-                <label className="text-[10px] text-slate-500">
-                  X %
+              {extraLogo.url && (
+                <label className="block text-[10px] text-slate-500">
+                  Ukuran %
                   <input
-                    type="number" min="5" max="95" value={extraLogo.x}
-                    onChange={(e) => setExtraLogo((p) => ({ ...p, x: Number(e.target.value) }))}
-                    className="mt-1 w-full rounded-lg border border-white/10 bg-slate-900 px-2 py-1.5 font-mono text-xs text-white"
-                  />
-                </label>
-                <label className="text-[10px] text-slate-500">
-                  Y %
-                  <input
-                    type="number" min="5" max="95" value={extraLogo.y}
-                    onChange={(e) => setExtraLogo((p) => ({ ...p, y: Number(e.target.value) }))}
-                    className="mt-1 w-full rounded-lg border border-white/10 bg-slate-900 px-2 py-1.5 font-mono text-xs text-white"
-                  />
-                </label>
-                <label className="text-[10px] text-slate-500">
-                  Size %
-                  <input
-                    type="number" min="4" max="40" value={extraLogo.size}
+                    type="range"
+                    min="4"
+                    max="40"
+                    value={extraLogo.size}
                     onChange={(e) => setExtraLogo((p) => ({ ...p, size: Number(e.target.value) }))}
-                    className="mt-1 w-full rounded-lg border border-white/10 bg-slate-900 px-2 py-1.5 font-mono text-xs text-white"
+                    className="mt-1 w-full"
                   />
+                  <span className="font-mono text-xs text-white">{extraLogo.size}%</span>
                 </label>
-              </div>
+              )}
             </div>
 
             <p className="pt-2 font-semibold text-white">Placeholders</p>
