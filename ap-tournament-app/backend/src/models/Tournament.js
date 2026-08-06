@@ -25,6 +25,7 @@ const tournamentSchema = new mongoose.Schema(
     certificateTemplate: String,
     certificatePlaceholders: { type: mongoose.Schema.Types.Mixed, default: {} },
     certificateStyle: { type: mongoose.Schema.Types.Mixed, default: {} },
+    certificateExtraLogo: { type: mongoose.Schema.Types.Mixed, default: {} },
     teams: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Team' }],
   },
   { timestamps: true }

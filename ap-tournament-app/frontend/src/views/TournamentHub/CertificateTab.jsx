@@ -83,7 +83,7 @@ function mergePlaceholders(saved = {}) {
 }
 
 async function renderCertificate({
-  templateUrl, placeholders, style, teamName, rank, tournamentName, date, finalScore,
+  templateUrl, placeholders, style, teamName, rank, tournamentName, date, finalScore, extraLogo,
 }) {
   await ensureFonts([style.displayFont, style.bodyFont]);
   const canvas = document.createElement('canvas');
@@ -105,6 +105,19 @@ async function renderCertificate({
     ctx.strokeStyle = style.colors.rank;
     ctx.lineWidth = 6;
     ctx.strokeRect(40, 40, canvas.width - 80, canvas.height - 80);
+  }
+
+  // Extra logo (sponsor / organizer / community)
+  if (extraLogo?.enabled && extraLogo?.url) {
+    try {
+      const logoImg = await loadImage(resolveAssetUrl(extraLogo.url));
+      const sizePct = Math.min(40, Math.max(4, Number(extraLogo.size) || 12));
+      const w = (sizePct / 100) * canvas.width;
+      const h = w * (logoImg.naturalHeight / (logoImg.naturalWidth || 1));
+      const x = ((Number(extraLogo.x) || 15) / 100) * canvas.width - w / 2;
+      const y = ((Number(extraLogo.y) || 15) / 100) * canvas.height - h / 2;
+      ctx.drawImage(logoImg, x, y, w, h);
+    } catch { /* skip logo if load fails */ }
   }
 
   const drawText = (text, pos, size, color, fontFamily, weight = '700') => {
@@ -146,7 +159,16 @@ export default function CertificateTab() {
     ...(tournament?.certificateStyle || {}),
     colors: { ...DEFAULT_STYLE.colors, ...(tournament?.certificateStyle?.colors || {}) },
   });
+  const [extraLogo, setExtraLogo] = useState({
+    url: '',
+    x: 15,
+    y: 15,
+    size: 12,
+    enabled: false,
+    ...(tournament?.certificateExtraLogo || {}),
+  });
   const [dragging, setDragging] = useState(null);
+  const [uploadingExtra, setUploadingExtra] = useState(false);
   const canvasRef = useRef(null);
 
   useEffect(() => {
@@ -160,6 +182,14 @@ export default function CertificateTab() {
       ...DEFAULT_STYLE,
       ...(tournament?.certificateStyle || {}),
       colors: { ...DEFAULT_STYLE.colors, ...(tournament?.certificateStyle?.colors || {}) },
+    });
+    setExtraLogo({
+      url: '',
+      x: 15,
+      y: 15,
+      size: 12,
+      enabled: false,
+      ...(tournament?.certificateExtraLogo || {}),
     });
   }, [tournament]);
 
@@ -182,6 +212,28 @@ export default function CertificateTab() {
       }
     } finally {
       setUploading(false);
+    }
+  };
+
+  const onExtraLogoFile = async (file) => {
+    if (!file?.type?.startsWith('image/')) return;
+    setUploadingExtra(true);
+    try {
+      const local = await new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(r.result);
+        r.onerror = reject;
+        r.readAsDataURL(file);
+      });
+      setExtraLogo((prev) => ({ ...prev, url: local, enabled: true }));
+      try {
+        const res = await api.uploadLogo(file);
+        if (res.url) setExtraLogo((prev) => ({ ...prev, url: res.url, enabled: true }));
+      } catch {
+        /* keep local data URL */
+      }
+    } finally {
+      setUploadingExtra(false);
     }
   };
 
@@ -243,9 +295,15 @@ export default function CertificateTab() {
         certificateTemplate: templateUrl?.startsWith('data:') ? tournament.certificateTemplate : templateUrl,
         certificatePlaceholders: phPayload,
         certificateStyle: style,
+        certificateExtraLogo: {
+          ...extraLogo,
+          url: extraLogo.url?.startsWith('data:')
+            ? (tournament.certificateExtraLogo?.url || '')
+            : extraLogo.url,
+        },
       });
       await refresh?.();
-      setToast({ message: 'Template, warna & placeholder disimpan!', type: 'success' });
+      setToast({ message: 'Template, warna, logo & placeholder disimpan!', type: 'success' });
     } catch (err) {
       setToast({ message: err.message, type: 'error' });
     } finally {
@@ -269,6 +327,7 @@ export default function CertificateTab() {
           tournamentName: tournament.name,
           date,
           finalScore: top[i].totalPoints ?? 0,
+          extraLogo,
         });
         certs.push({ rank: i + 1, teamName: top[i].teamName, dataUrl, finalScore: top[i].totalPoints });
       }
@@ -328,6 +387,21 @@ export default function CertificateTab() {
               <img src={previewSrc} alt="Template" className="absolute inset-0 h-full w-full object-contain" draggable={false} />
             ) : (
               <div className="flex h-full items-center justify-center text-sm text-slate-600">Belum ada template</div>
+            )}
+            {extraLogo.enabled && extraLogo.url && (
+              <img
+                src={resolveAssetUrl(extraLogo.url)}
+                alt=""
+                className="pointer-events-none absolute z-[5] object-contain"
+                style={{
+                  left: `${extraLogo.x}%`,
+                  top: `${extraLogo.y}%`,
+                  width: `${extraLogo.size}%`,
+                  transform: 'translate(-50%, -50%)',
+                  background: 'transparent',
+                }}
+                draggable={false}
+              />
             )}
             {Object.entries(placeholders).filter(([, pos]) => pos.enabled).map(([key, pos]) => (
               <button
@@ -390,6 +464,52 @@ export default function CertificateTab() {
               {colorField('score', 'Score Poin Akhir')}
               {colorField('tournament', 'Turnamen')}
               {colorField('date', 'Tanggal')}
+            </div>
+
+            <p className="pt-2 font-semibold text-white">Logo Tambahan (Sponsor / Organizer / Komunitas)</p>
+            <div className="space-y-3 rounded-xl border border-white/10 bg-slate-800/40 p-3">
+              <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-xs text-white hover:bg-slate-700">
+                <UploadSimple size={14} />
+                {uploadingExtra ? 'Uploading…' : 'Upload Logo Tambahan'}
+                <input type="file" accept="image/*" className="hidden" disabled={uploadingExtra} onChange={(e) => onExtraLogoFile(e.target.files?.[0])} />
+              </label>
+              <label className="flex items-center gap-2 text-xs text-slate-300">
+                <input
+                  type="checkbox"
+                  checked={!!extraLogo.enabled}
+                  onChange={(e) => setExtraLogo((p) => ({ ...p, enabled: e.target.checked }))}
+                />
+                Tampilkan logo di sertifikat
+              </label>
+              {extraLogo.url && (
+                <img src={resolveAssetUrl(extraLogo.url)} alt="Extra logo" className="h-12 w-12 object-contain" style={{ background: 'transparent' }} />
+              )}
+              <div className="grid grid-cols-3 gap-2">
+                <label className="text-[10px] text-slate-500">
+                  X %
+                  <input
+                    type="number" min="5" max="95" value={extraLogo.x}
+                    onChange={(e) => setExtraLogo((p) => ({ ...p, x: Number(e.target.value) }))}
+                    className="mt-1 w-full rounded-lg border border-white/10 bg-slate-900 px-2 py-1.5 font-mono text-xs text-white"
+                  />
+                </label>
+                <label className="text-[10px] text-slate-500">
+                  Y %
+                  <input
+                    type="number" min="5" max="95" value={extraLogo.y}
+                    onChange={(e) => setExtraLogo((p) => ({ ...p, y: Number(e.target.value) }))}
+                    className="mt-1 w-full rounded-lg border border-white/10 bg-slate-900 px-2 py-1.5 font-mono text-xs text-white"
+                  />
+                </label>
+                <label className="text-[10px] text-slate-500">
+                  Size %
+                  <input
+                    type="number" min="4" max="40" value={extraLogo.size}
+                    onChange={(e) => setExtraLogo((p) => ({ ...p, size: Number(e.target.value) }))}
+                    className="mt-1 w-full rounded-lg border border-white/10 bg-slate-900 px-2 py-1.5 font-mono text-xs text-white"
+                  />
+                </label>
+              </div>
             </div>
 
             <p className="pt-2 font-semibold text-white">Placeholders</p>

@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useOutletContext } from 'react-router-dom';
-import { UploadSimple, Scan, PencilSimple, ClockCounterClockwise } from '@phosphor-icons/react';
+import { UploadSimple, Scan, PencilSimple, ClockCounterClockwise, ArrowsClockwise } from '@phosphor-icons/react';
 import Button from '../../components/Button';
 import ProgressBar from '../../components/ProgressBar';
 import TerminalLogs, { createLogEntry } from '../../components/TerminalLogs';
@@ -112,8 +112,15 @@ export default function MatchInputTab() {
     setToast({ message: `Edit Match ${mn} — hasil OCR/input sebelumnya dimuat`, type: 'success' });
   };
 
-  const runOCR = async () => {
-    if (!files.length) return;
+  const runOCR = async (opts = {}) => {
+    const isRescan = !!opts.rescan;
+    const hasFiles = files.length > 0;
+    const hasPreviews = previews.length > 0;
+    if (!hasFiles && !hasPreviews) {
+      setToast({ message: 'Upload screenshot dulu sebelum OCR', type: 'error' });
+      return;
+    }
+
     setScanning(true);
     setVerifiedResults([]);
     setNicknames([]);
@@ -123,13 +130,22 @@ export default function MatchInputTab() {
 
     try {
       addLog(`Mode: ${inputMode === 'cr_league' ? 'CR League' : 'CR Biasa'}`);
-      addLog(`Gemini Vision multi-pass: ${files.length} screenshot(s)`);
+      addLog(isRescan ? 'Re-scan OCR dari gambar yang sama…' : 'Gemini Vision multi-pass OCR…');
 
       const dataUrls = [];
-      for (let i = 0; i < files.length; i += 1) {
-        addLog(`Pre-processing screenshot ${i + 1}/${files.length}...`);
-        const { primary } = await cropForMode(files[i], inputMode);
-        dataUrls.push(primary);
+      if (hasFiles) {
+        addLog(`Pre-processing ${files.length} file(s)…`);
+        for (let i = 0; i < files.length; i += 1) {
+          addLog(`Crop screenshot ${i + 1}/${files.length}...`);
+          const { primary } = await cropForMode(files[i], inputMode);
+          dataUrls.push(primary);
+        }
+      } else {
+        // Re-scan dari preview tersimpan (data URL / resolved URL)
+        addLog(`Re-scan ${previews.length} gambar tersimpan…`);
+        for (let i = 0; i < previews.length; i += 1) {
+          dataUrls.push(previews[i]);
+        }
       }
 
       const result = await scanMultiPass(
@@ -154,13 +170,20 @@ export default function MatchInputTab() {
         players: r.players || [],
         placementPoints: getDefaultPlacementPoints(r.placement, scoringRules)
           + (r.placement === 1 ? (scoringRules.booyahBonus || 0) : 0),
+        // CR League: kills field dari OCR = total score ranklist
+        totalScore: inputMode === 'cr_league' ? (r.kills ?? r.totalScore ?? 0) : (r.totalScore ?? r.kills ?? 0),
       }));
 
       setVerifiedResults(matched);
       setNicknames(result.nicknames || []);
       setStartStep(1);
       setManualOpen(true);
-      setToast({ message: `OCR selesai (${files.length} pass). Verifikasi roster → skor.`, type: 'success' });
+      setToast({
+        message: isRescan
+          ? `Re-scan selesai (${dataUrls.length} gambar). Verifikasi lagi.`
+          : `OCR selesai (${dataUrls.length} pass). Verifikasi roster → skor.`,
+        type: 'success',
+      });
       setProgress(100);
     } catch (err) {
       addLog(`ERROR: ${err.message}`);
@@ -178,25 +201,37 @@ export default function MatchInputTab() {
     try {
       const payload = source
         .filter((r) => r.teamId || r.teamName)
-        .map((r) => ({
-          teamId: r.teamId,
-          teamName: r.teamName || teams.find((t) => t._id === r.teamId)?.name,
-          placement: parseInt(r.placement, 10),
-          kills: parseInt(r.kills, 10) || 0,
-          totalScore: parseInt(r.totalScore, 10) || 0,
-          placementPoints: r.placementPoints != null ? parseInt(r.placementPoints, 10) : undefined,
-          totalPoints: r.totalPoints,
-          ocrNickname: r.ocrNickname || r.nickname || '',
-          players: r.players || [],
-        }));
+        .map((r) => {
+          const kills = parseInt(r.kills, 10) || 0;
+          const totalScore = inputMode === 'cr_league'
+            ? (parseInt(r.totalScore ?? r.totalPoints ?? r.kills, 10) || 0)
+            : kills;
+          return {
+            teamId: r.teamId,
+            teamName: r.teamName || teams.find((t) => t._id === r.teamId)?.name,
+            placement: parseInt(r.placement, 10),
+            kills: inputMode === 'cr_league' ? 0 : kills,
+            totalScore,
+            placementPoints: r.placementPoints != null ? parseInt(r.placementPoints, 10) : undefined,
+            totalPoints: inputMode === 'cr_league' ? totalScore : r.totalPoints,
+            ocrNickname: r.ocrNickname || r.nickname || '',
+            players: r.players || [],
+          };
+        });
 
       const scored = calcMatchPoints(payload, inputMode, scoringRules).map((row, i) => {
         const src = payload[i];
         if (inputMode === 'cr_league') {
           return {
             ...row,
+            kills: 0,
+            killPoints: 0,
+            placementPoints: 0,
+            totalScore: src.totalScore,
+            totalPoints: src.totalScore,
             ocrNickname: src.ocrNickname,
             players: src.players,
+            mode: 'cr_league',
           };
         }
         const killPt = scoringRules.killPoint ?? 1;
@@ -346,8 +381,18 @@ export default function MatchInputTab() {
           )}
           <div className="mt-4 flex flex-wrap justify-center gap-2">
             {files.length > 0 && (
-              <Button onClick={runOCR} loading={scanning} disabled={scanning}>
+              <Button onClick={() => runOCR()} loading={scanning} disabled={scanning}>
                 <Scan size={18} /> Scan {files.length} Screenshot{files.length > 1 ? 's' : ''}
+              </Button>
+            )}
+            {(files.length > 0 || previews.length > 0) && (
+              <Button
+                variant="secondary"
+                onClick={() => runOCR({ rescan: true })}
+                loading={scanning}
+                disabled={scanning}
+              >
+                <ArrowsClockwise size={18} /> OCR Ulang / Re-scan
               </Button>
             )}
             <Button variant="ghost" onClick={() => { setStartStep(3); setManualOpen(true); }}>

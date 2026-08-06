@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { io } from 'socket.io-client';
 import { api, resolveAssetUrl, API_BASE } from '../../utils/api';
+import { MatchTreeHeaders, MatchScoreCells, matchColumnCount } from '../../components/MatchTreeHeaders';
 
 function socketOrigin() {
   return API_BASE.replace(/\/api\/?$/, '');
@@ -75,7 +76,7 @@ export default function ObsOverlay() {
   const mode = tournament?.inputMode || 'cr_biasa';
   const totalMatches = tournament?.totalMatches || 6;
   const matchNumbers = Array.from({ length: totalMatches }, (_, i) => i + 1);
-  const matchCols = totalMatches * 2;
+  const matchCols = matchColumnCount(totalMatches, mode);
 
   if (!tournament) {
     return (
@@ -103,6 +104,7 @@ export default function ObsOverlay() {
       </div>
 
       <div className="relative z-10 flex h-full flex-col px-6 py-5">
+        {/* No tournament logo — LIVE SCORE + Free Fire mark only */}
         <header className="mb-3 flex items-center justify-between border-b border-cyan-400/35 pb-3">
           <div className="flex items-center gap-3">
             <img
@@ -125,19 +127,14 @@ export default function ObsOverlay() {
         </header>
 
         <div
-          className="mb-2 grid gap-1 text-[10px] font-bold uppercase tracking-wider text-cyan-200/70"
-          style={{ gridTemplateColumns: `36px 36px minmax(0,1.6fr) repeat(${matchCols}, minmax(0,1fr)) 56px` }}
+          className="mb-2 grid items-end gap-1"
+          style={{ gridTemplateColumns: `36px 36px minmax(0,1.5fr) repeat(${matchCols}, minmax(0,1fr)) 56px` }}
         >
-          <span>#</span>
+          <span className="pb-1 text-[10px] font-bold text-cyan-200/60">#</span>
           <span />
-          <span>Team</span>
-          {matchNumbers.map((n) => (
-            <span key={n} className="col-span-2 grid grid-cols-2 text-center">
-              <span>M{n}P</span>
-              <span>M{n}K</span>
-            </span>
-          ))}
-          <span className="text-right">PTS</span>
+          <span className="pb-1 text-[10px] font-bold uppercase text-cyan-200/60">Team</span>
+          <MatchTreeHeaders matchNumbers={matchNumbers} mode={mode} />
+          <span className="pb-1 text-right text-[10px] font-bold text-cyan-200/60">TOTAL</span>
         </div>
 
         <div className="flex flex-1 flex-col justify-start gap-1.5 overflow-hidden">
@@ -148,7 +145,7 @@ export default function ObsOverlay() {
                 key={`${team.teamId || team.teamName}-${tick}`}
                 className="grid items-center gap-1 rounded-lg border border-cyan-400/25 bg-black/55 px-2 py-2 backdrop-blur-md"
                 style={{
-                  gridTemplateColumns: `36px 36px minmax(0,1.6fr) repeat(${matchCols}, minmax(0,1fr)) 56px`,
+                  gridTemplateColumns: `36px 36px minmax(0,1.5fr) repeat(${matchCols}, minmax(0,1fr)) 56px`,
                   animation: `${animName} 0.55s ease-out both`,
                   animationDelay: `${idx * 0.08}s`,
                   boxShadow: team.rank <= 3 ? '0 0 16px rgba(34,211,238,0.22)' : 'none',
@@ -165,17 +162,7 @@ export default function ObsOverlay() {
                 <p className="truncate font-display text-base font-bold uppercase tracking-wide text-white">
                   {team.teamName}
                 </p>
-                {matchNumbers.map((n) => {
-                  const bd = team.matchBreakdown?.[n];
-                  const pts = bd?.totalPoints ?? team.matchScores?.[n];
-                  const kills = bd?.kills;
-                  return (
-                    <span key={n} className="col-span-2 grid grid-cols-2 text-center">
-                      <span className="font-mono text-sm font-bold text-emerald-300">{pts == null ? '-' : pts}</span>
-                      <span className="font-mono text-sm text-cyan-200">{kills == null ? '-' : kills}</span>
-                    </span>
-                  );
-                })}
+                <MatchScoreCells team={team} matchNumbers={matchNumbers} mode={mode} />
                 <span className="text-right font-mono text-xl font-black text-amber-300 drop-shadow-[0_0_8px_#f59e0b]">
                   {team.totalPoints}
                 </span>

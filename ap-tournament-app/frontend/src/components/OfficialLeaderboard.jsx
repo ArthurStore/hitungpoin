@@ -1,5 +1,6 @@
 import { Fire } from '@phosphor-icons/react';
 import { resolveAssetUrl } from '../utils/api';
+import { MatchTreeHeaders, MatchScoreCells, matchColumnCount } from './MatchTreeHeaders';
 
 const RANK_STYLES = {
   1: {
@@ -16,7 +17,6 @@ const RANK_STYLES = {
   },
 };
 
-/** 9:16 mobile story — padat untuk 15 tim */
 const POSTER_W = 540;
 const POSTER_H = 960;
 const MAX_TEAMS = 15;
@@ -55,10 +55,9 @@ export default function OfficialLeaderboard({
   const logoUrl = resolveAssetUrl(tournament?.logo);
   const mode = tournament?.inputMode || 'cr_biasa';
   const rows = standings.slice(0, MAX_TEAMS);
-  const rowH = Math.floor(700 / Math.max(rows.length || 15, 15));
-
-  // Each match = Pts + Kills side by side
-  const matchCols = totalMatches * 2;
+  const rowH = Math.floor(680 / Math.max(rows.length || 15, 15));
+  const matchCols = matchColumnCount(totalMatches, mode);
+  const isLeague = mode === 'cr_league';
 
   return (
     <div className="mx-auto overflow-hidden rounded-2xl shadow-2xl ring-1 ring-white/10" style={{ width: POSTER_W }}>
@@ -104,7 +103,6 @@ export default function OfficialLeaderboard({
               </p>
             </div>
 
-            {/* Official Free Fire asset (uploaded PNG) — no SVG */}
             <div className="flex h-14 w-20 shrink-0 items-center justify-center">
               <img
                 src="/free-fire-logo.png"
@@ -118,27 +116,22 @@ export default function OfficialLeaderboard({
 
           <div className="h-px bg-gradient-to-r from-transparent via-amber-500/50 to-transparent" />
           <p className="mt-1 text-center text-[9px] uppercase tracking-widest text-slate-500">
-            {mode === 'cr_league' ? 'CR League · Pts | Kills' : 'CR Biasa · Pts | Kills per Match'}
+            {isLeague ? 'CR League · Total Score per Match' : 'CR Biasa · PTS & KILL per Match'}
           </p>
         </div>
 
         <div className="relative z-10 flex-1 overflow-hidden px-2 pb-2">
           <div
-            className="mb-1 grid items-end gap-x-0.5 px-0.5 text-[8px] font-bold uppercase tracking-wide text-slate-400"
+            className="mb-1 grid items-end gap-x-0.5 px-0.5"
             style={{
-              gridTemplateColumns: `22px 30px minmax(0, 1.2fr) repeat(${matchCols}, minmax(0, 1fr)) 40px`,
+              gridTemplateColumns: `22px 30px minmax(0, 1.15fr) repeat(${matchCols}, minmax(0, 1fr)) 40px`,
             }}
           >
-            <span>#</span>
+            <span className="pb-1 text-[8px] font-bold text-slate-500">#</span>
             <span />
-            <span className="truncate">Team</span>
-            {matchNumbers.map((n) => (
-              <span key={n} className="col-span-2 grid grid-cols-2 text-center">
-                <span>M{n}P</span>
-                <span>M{n}K</span>
-              </span>
-            ))}
-            <span className="text-right">PTS</span>
+            <span className="truncate pb-1 text-[8px] font-bold uppercase text-slate-500">Team</span>
+            <MatchTreeHeaders matchNumbers={matchNumbers} mode={mode} compact />
+            <span className="pb-1 text-right text-[8px] font-bold text-slate-500">TOTAL</span>
           </div>
 
           <div className="flex flex-col" style={{ gap: 2 }}>
@@ -155,7 +148,7 @@ export default function OfficialLeaderboard({
                   key={team.teamId || team.teamName}
                   className={`grid items-center gap-x-0.5 rounded-sm bg-gradient-to-r px-0.5 ${rs.row}`}
                   style={{
-                    gridTemplateColumns: `22px 30px minmax(0, 1.2fr) repeat(${matchCols}, minmax(0, 1fr)) 40px`,
+                    gridTemplateColumns: `22px 30px minmax(0, 1.15fr) repeat(${matchCols}, minmax(0, 1fr)) 40px`,
                     minHeight: Math.max(32, Math.min(46, rowH)),
                     height: Math.max(32, Math.min(46, rowH)),
                   }}
@@ -168,36 +161,14 @@ export default function OfficialLeaderboard({
                     {team.rank === 1 && <Fire size={11} weight="fill" className="mr-0.5 inline text-orange-300" />}
                     {team.teamName}
                   </p>
-                  {matchNumbers.map((n) => {
-                    const bd = team.matchBreakdown?.[n];
-                    const pts = mode === 'cr_league'
-                      ? (bd?.totalPoints ?? team.matchScores?.[n])
-                      : (bd?.totalPoints ?? team.matchScores?.[n]);
-                    const kills = bd?.kills ?? '—';
-                    const cell = (
-                      <>
-                        <span className="text-center font-mono text-[11px] font-bold text-emerald-300">
-                          {pts == null ? '-' : pts}
-                        </span>
-                        <span className="text-center font-mono text-[10px] font-semibold text-cyan-200/90">
-                          {kills === '—' || kills == null ? '-' : kills}
-                        </span>
-                      </>
-                    );
-                    return editable ? (
-                      <button
-                        key={n}
-                        type="button"
-                        onClick={() => onEditMatchScore?.(team, n)}
-                        className="col-span-2 grid grid-cols-2 rounded hover:bg-white/10"
-                        title={`Edit M${n}`}
-                      >
-                        {cell}
-                      </button>
-                    ) : (
-                      <span key={n} className="col-span-2 grid grid-cols-2">{cell}</span>
-                    );
-                  })}
+                  <MatchScoreCells
+                    team={team}
+                    matchNumbers={matchNumbers}
+                    mode={mode}
+                    editable={editable}
+                    onEdit={onEditMatchScore}
+                    compact
+                  />
                   <span className="text-right font-mono text-[14px] font-black text-amber-400">
                     {team.totalPoints}
                   </span>
