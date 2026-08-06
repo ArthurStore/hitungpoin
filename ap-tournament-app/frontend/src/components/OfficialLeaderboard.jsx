@@ -21,26 +21,6 @@ const POSTER_W = 540;
 const POSTER_H = 960;
 const MAX_TEAMS = 15;
 
-function TeamLogo({ logo, name }) {
-  const url = resolveAssetUrl(logo);
-  if (!url) {
-    return (
-      <div className="flex h-7 w-7 shrink-0 items-center justify-center text-[10px] font-bold text-white/40">
-        {(name || '?').slice(0, 1)}
-      </div>
-    );
-  }
-  return (
-    <img
-      src={url}
-      alt=""
-      className="h-7 w-7 shrink-0 object-contain"
-      style={{ background: 'transparent', border: 'none', boxShadow: 'none', outline: 'none' }}
-      crossOrigin="anonymous"
-    />
-  );
-}
-
 export default function OfficialLeaderboard({
   tournament,
   standings,
@@ -81,14 +61,12 @@ export default function OfficialLeaderboard({
               {logoUrl ? (
                 <img
                   src={logoUrl}
-                  alt="Organizer"
+                  alt=""
                   className="h-full w-full object-contain"
                   crossOrigin="anonymous"
                   style={{ background: 'transparent', border: 'none' }}
                 />
-              ) : (
-                <span className="text-[9px] font-bold uppercase text-white/40">LOGO</span>
-              )}
+              ) : null}
             </div>
 
             <div className="min-w-0 flex-1 text-center">
@@ -124,11 +102,10 @@ export default function OfficialLeaderboard({
           <div
             className="mb-1 grid items-end gap-x-0.5 px-0.5"
             style={{
-              gridTemplateColumns: `22px 30px minmax(0, 1.15fr) repeat(${matchCols}, minmax(0, 1fr)) 40px`,
+              gridTemplateColumns: `28px minmax(0, 1.35fr) repeat(${matchCols}, minmax(0, 1fr)) 42px`,
             }}
           >
             <span className="pb-1 text-[8px] font-bold text-slate-500">#</span>
-            <span />
             <span className="truncate pb-1 text-[8px] font-bold uppercase text-slate-500">Team</span>
             <MatchTreeHeaders matchNumbers={matchNumbers} mode={mode} compact />
             <span className="pb-1 text-right text-[8px] font-bold text-slate-500">TOTAL</span>
@@ -148,7 +125,7 @@ export default function OfficialLeaderboard({
                   key={team.teamId || team.teamName}
                   className={`grid items-center gap-x-0.5 rounded-sm bg-gradient-to-r px-0.5 ${rs.row}`}
                   style={{
-                    gridTemplateColumns: `22px 30px minmax(0, 1.15fr) repeat(${matchCols}, minmax(0, 1fr)) 40px`,
+                    gridTemplateColumns: `28px minmax(0, 1.35fr) repeat(${matchCols}, minmax(0, 1fr)) 42px`,
                     minHeight: Math.max(32, Math.min(46, rowH)),
                     height: Math.max(32, Math.min(46, rowH)),
                   }}
@@ -156,7 +133,6 @@ export default function OfficialLeaderboard({
                   <div className={`flex h-6 w-6 items-center justify-center rounded text-[11px] font-black ${rs.badge}`}>
                     {team.rank}
                   </div>
-                  <TeamLogo logo={team.logo} name={team.teamName} />
                   <p className="truncate text-[12px] font-bold uppercase leading-tight tracking-wide text-white" title={team.teamName}>
                     {team.rank === 1 && <Fire size={11} weight="fill" className="mr-0.5 inline text-orange-300" />}
                     {team.teamName}

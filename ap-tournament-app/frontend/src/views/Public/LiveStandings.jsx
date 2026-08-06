@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { Trophy } from '@phosphor-icons/react';
-import { api, resolveAssetUrl } from '../../utils/api';
+import { api } from '../../utils/api';
 import ThemeToggle from '../../components/ThemeToggle';
 import { MatchTreeHeaders, matchColumnCount } from '../../components/MatchTreeHeaders';
 
@@ -79,9 +79,6 @@ export default function LiveStandings() {
             >
               <span className={`font-mono font-bold ${s.rank <= 3 ? 'text-gold' : 'text-white light:text-slate-900'}`}>{s.rank}</span>
               <div className="flex min-w-0 items-center gap-2">
-                {s.logo ? (
-                  <img src={resolveAssetUrl(s.logo)} alt="" className="h-7 w-7 object-contain" style={{ background: 'transparent' }} />
-                ) : null}
                 <span className="truncate font-semibold text-white light:text-slate-900">{s.teamName}</span>
               </div>
               {matchNumbers.map((n) => {

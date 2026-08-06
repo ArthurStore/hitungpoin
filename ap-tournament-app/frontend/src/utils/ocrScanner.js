@@ -191,7 +191,7 @@ function mergePlayersFromGroup(group) {
   return Array.from(byNick.values()).slice(0, 4);
 }
 
-/** One entry per placement: 4 nicknames as a single team unit */
+/** One entry per placement: up to 4 nicknames as a single team unit (OCR screen) */
 export function extractTeamGroups(entries) {
   return (entries || [])
     .filter((r) => (r.placement || r.rank) >= 1)
@@ -241,32 +241,57 @@ function normNick(s) {
   return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
+function uniqueNorms(list) {
+  const seen = new Set();
+  const out = [];
+  list.forEach((n) => {
+    if (!n || seen.has(n)) return;
+    seen.add(n);
+    out.push(n);
+  });
+  return out;
+}
+
+/**
+ * Auto-match OCR placement → registered team.
+ * Requires ≥2 roster nick hits (incl. substitutes 5–6) OR strong team-name match.
+ */
 export function matchTeamsToRoster(ocrResults, registeredTeams) {
   return ocrResults.map((ocr) => {
-    const ocrNicks = [
+    const ocrNicks = uniqueNorms([
       ...(ocr.players || []).map((p) => normNick(p.nickname || p)),
       normNick(ocr.nickname),
       normNick(ocr.teamName),
-    ].filter(Boolean);
+    ]);
 
     let bestMatch = null;
     let bestScore = 0;
 
     (registeredTeams || []).forEach((team) => {
       const teamNorm = normNick(team.name);
-      const rosterNicks = (team.players || [])
-        .map((p) => normNick(p.nickname || p.name || p))
-        .filter(Boolean);
+      const rosterNicks = uniqueNorms(
+        (team.players || []).map((p) => normNick(p.nickname || p.name || p))
+      );
 
       let score = 0;
+      // Strong name match
       if (teamNorm && ocrNicks.some((n) => n === teamNorm)) score = 100;
-      else if (teamNorm && ocrNicks.some((n) => n.includes(teamNorm) || teamNorm.includes(n))) score = 75;
+      else if (teamNorm && teamNorm.length >= 3 && ocrNicks.some((n) => n.includes(teamNorm) || teamNorm.includes(n))) {
+        score = 80;
+      }
 
-      // Reverse auto-match: OCR nick found in saved roster
+      // Roster memory: need ≥2 overlapping nicks for auto-select (incl. cadangan)
       const rosterHits = ocrNicks.filter((n) =>
-        rosterNicks.some((r) => r === n || (r.length > 2 && n.length > 2 && (r.includes(n) || n.includes(r))))
+        rosterNicks.some((r) =>
+          r === n || (r.length > 2 && n.length > 2 && (r.includes(n) || n.includes(r)))
+        )
       ).length;
-      if (rosterHits > 0) score = Math.max(score, 70 + Math.min(rosterHits, 4) * 10);
+
+      if (rosterHits >= 2) {
+        score = Math.max(score, 90 + Math.min(rosterHits, 4) * 2);
+      } else if (rosterHits === 1 && score < 80) {
+        score = Math.max(score, 45); // weak — not enough alone for confident auto-select
+      }
 
       if (score > bestScore) {
         bestScore = score;
@@ -274,10 +299,12 @@ export function matchTeamsToRoster(ocrResults, registeredTeams) {
       }
     });
 
+    // Only auto-bind when confidence is solid (≥70)
+    const confident = bestScore >= 70;
     return {
       ...ocr,
-      teamId: bestMatch?._id || null,
-      matchedTeamName: bestMatch?.name || ocr.teamName,
+      teamId: confident ? (bestMatch?._id || null) : null,
+      matchedTeamName: confident ? (bestMatch?.name || ocr.teamName) : ocr.teamName,
       matchConfidence: bestScore,
     };
   });

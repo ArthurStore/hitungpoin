@@ -24,8 +24,10 @@ function placementPtsFor(placement, rules) {
 
 function nickListFromRow(r) {
   const fromPlayers = (r.players || []).map((p) => p.nickname || p).filter(Boolean);
-  if (fromPlayers.length) return fromPlayers.slice(0, 4);
-  if (r.ocrNickname) return [r.ocrNickname];
+  if (fromPlayers.length) return fromPlayers.slice(0, 6);
+  if (r.ocrNickname) {
+    return String(r.ocrNickname).split(/[·|,]/).map((s) => s.trim()).filter(Boolean).slice(0, 6);
+  }
   if (r.nickname) return [r.nickname];
   return [];
 }
@@ -238,10 +240,12 @@ export default function ManualInputModal({
       groups = Array.from(byPlace.values());
     }
 
-    // Auto-match each group to roster by nickname overlap
+    // Auto-match each group to roster by nickname overlap (≥2 hits)
     const matchedGroups = groups.map((g) => {
       if (g.teamId) return g;
-      const ocrNorms = g.nicknames.map((n) => n.toLowerCase().replace(/[^a-z0-9]/g, '')).filter(Boolean);
+      const ocrNorms = [...new Set(
+        (g.nicknames || []).map((n) => n.toLowerCase().replace(/[^a-z0-9]/g, '')).filter(Boolean)
+      )];
       let best = null;
       let bestScore = 0;
       localTeams.forEach((t) => {
@@ -249,34 +253,39 @@ export default function ManualInputModal({
         const nameNorm = t.name.toLowerCase().replace(/[^a-z0-9]/g, '');
         let score = 0;
         const hits = ocrNorms.filter((n) => roster.some((r) => r === n || (r.length > 2 && (r.includes(n) || n.includes(r))))).length;
-        if (hits > 0) score = 70 + hits * 10;
-        if (nameNorm && ocrNorms.some((n) => n === nameNorm || n.includes(nameNorm))) score = Math.max(score, 90);
+        if (hits >= 2) score = 90 + hits * 2;
+        if (nameNorm && ocrNorms.some((n) => n === nameNorm || (nameNorm.length >= 3 && n.includes(nameNorm)))) {
+          score = Math.max(score, 95);
+        }
         if (score > bestScore) { bestScore = score; best = t; }
       });
+      if (!best || bestScore < 70) return g;
       return {
         ...g,
-        teamId: best?._id || '',
-        teamName: best?.name || '',
+        teamId: best._id,
+        teamName: best.name,
       };
     });
     setGroupMap(matchedGroups);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, initialRows, nicknames, teamGroups, startStep, tournament]);
 
-  // Re-match when teams list grows (after create)
+  // Re-match when teams list grows (after create) — ≥2 roster hits
   useEffect(() => {
     if (!open || !localTeams.length) return;
     setGroupMap((prev) => prev.map((g) => {
       if (g.teamId) return g;
-      const ocrNorms = (g.nicknames || []).map((n) => n.toLowerCase().replace(/[^a-z0-9]/g, '')).filter(Boolean);
+      const ocrNorms = [...new Set(
+        (g.nicknames || []).map((n) => n.toLowerCase().replace(/[^a-z0-9]/g, '')).filter(Boolean)
+      )];
       let best = null;
-      let bestScore = 0;
+      let bestHits = 0;
       localTeams.forEach((t) => {
         const roster = (t.players || []).map((p) => (p.nickname || '').toLowerCase().replace(/[^a-z0-9]/g, '')).filter(Boolean);
         const hits = ocrNorms.filter((n) => roster.some((r) => r === n || (r.length > 2 && (r.includes(n) || n.includes(r))))).length;
-        if (hits > bestScore) { bestScore = hits; best = t; }
+        if (hits > bestHits) { bestHits = hits; best = t; }
       });
-      if (!best) return g;
+      if (!best || bestHits < 2) return g;
       return { ...g, teamId: best._id, teamName: best.name };
     }));
   }, [localTeams, open]);
@@ -332,11 +341,12 @@ export default function ManualInputModal({
     setCreating(true);
     setToastMsg('');
     try {
-      const players = (g.nicknames || []).slice(0, 4).map((n) => ({ nickname: n }));
+      const players = (g.nicknames || []).slice(0, 6).map((n) => ({ nickname: n }));
       const team = await api.upsertTeam(tournament._id, {
         name,
         players,
         representative: players[0]?.nickname || '',
+        merge: true,
       });
       setLocalTeams((prev) => {
         const exists = prev.some((t) => t._id === team._id);
@@ -494,11 +504,24 @@ export default function ManualInputModal({
                           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                             <select
                               value={g.teamId}
-                              onChange={(e) => {
+                              onChange={async (e) => {
                                 const team = localTeams.find((t) => t._id === e.target.value);
                                 setGroupMap((prev) => prev.map((row, j) =>
                                   j === i ? { ...row, teamId: e.target.value, teamName: team?.name || '' } : row
                                 ));
+                                // Sync OCR nicks → master roster (merge, max 6)
+                                if (team && tournament?._id && (g.nicknames || []).length) {
+                                  try {
+                                    const updated = await api.upsertTeam(tournament._id, {
+                                      teamId: team._id,
+                                      name: team.name,
+                                      players: (g.nicknames || []).map((n) => ({ nickname: n })),
+                                      merge: true,
+                                    });
+                                    setLocalTeams((prev) => prev.map((t) => (t._id === updated._id ? updated : t)));
+                                    await onTeamsUpdated?.(updated);
+                                  } catch { /* non-fatal */ }
+                                }
                               }}
                               className="flex-1 rounded-lg border border-white/10 bg-slate-900 px-2 py-1.5 text-sm text-white"
                             >

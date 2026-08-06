@@ -279,6 +279,28 @@ export default function MatchInputTab() {
         ocrProcessed: verifiedResults.length > 0,
         screenshots,
       });
+
+      // Dual-sync: merge OCR nicknames into Master Team roster (up to 6)
+      for (const row of scored) {
+        const name = row.teamName || teams.find((t) => t._id === row.teamId)?.name;
+        if (!name) continue;
+        let nicks = (row.players || [])
+          .map((p) => (typeof p === 'string' ? p : p.nickname))
+          .filter(Boolean);
+        if (!nicks.length && row.ocrNickname) {
+          nicks = String(row.ocrNickname).split(/[·|,]/).map((s) => s.trim()).filter(Boolean);
+        }
+        if (!nicks.length) continue;
+        try {
+          await api.upsertTeam(tournament._id, {
+            teamId: row.teamId || undefined,
+            name,
+            players: nicks.map((n) => ({ nickname: n })),
+            merge: true,
+          });
+        } catch { /* non-fatal */ }
+      }
+
       if (!verifiedResults.length) {
         try { await api.recordManualScan(); } catch { /* ignore */ }
       }
@@ -289,7 +311,18 @@ export default function MatchInputTab() {
       setNicknames([]);
       setTeamGroups([]);
       setManualOpen(false);
-      setToast({ message: 'Match results saved ke leaderboard!', type: 'success' });
+
+      // Auto-advance ke match berikutnya
+      const total = tournament.totalMatches || matches.length || 6;
+      const savedNo = matchNumber;
+      const nextNo = savedNo < total ? savedNo + 1 : savedNo;
+      if (nextNo !== savedNo) setMatchNumber(nextNo);
+      setToast({
+        message: nextNo !== savedNo
+          ? `Match ${savedNo} tersimpan! Lanjut ke Match ${nextNo}`
+          : `Match ${savedNo} tersimpan ke leaderboard!`,
+        type: 'success',
+      });
     } catch (err) {
       setToast({ message: err.message, type: 'error' });
     } finally {

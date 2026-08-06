@@ -126,7 +126,8 @@ export function parseRosterInput(text) {
       .split('//')
       .map((p) => p.trim())
       .filter(Boolean)
-      .map((nickname) => ({ nickname }));
+      .map((nickname) => ({ nickname }))
+      .slice(0, 6);
     const representative = players[0]?.nickname || '';
     return { name: teamName, representative, players };
   });

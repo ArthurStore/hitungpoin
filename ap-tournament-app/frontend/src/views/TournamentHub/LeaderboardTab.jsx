@@ -134,7 +134,28 @@ export default function LeaderboardTab() {
     .toLowerCase()
     .trim()
     .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '');
+    .replace(/^-|-$/g, '') || String(tournament._id);
+  const slugUrl = `${window.location.origin}/overlay/${slug}`;
+
+  const copyText = async (text, successMsg) => {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+      setToast({ message: successMsg, type: 'success' });
+    } catch {
+      setToast({ message: 'Gagal menyalin — salin manual: ' + text, type: 'error' });
+    }
+  };
 
   if (loading) {
     return <div className="h-64 animate-pulse rounded-2xl bg-slate-800" />;
@@ -155,14 +176,12 @@ export default function LeaderboardTab() {
           <Button variant="ghost" onClick={() => window.open(`/overlay/${tournament._id}`, '_blank')}>
             <Broadcast size={16} /> OBS Overlay
           </Button>
-          <Button variant="ghost" onClick={() => navigator.clipboard?.writeText(overlayUrl)}>
+          <Button variant="ghost" onClick={() => copyText(overlayUrl, 'Overlay URL berhasil disalin!')}>
             Copy Overlay URL
           </Button>
-          {slug && (
-            <Button variant="ghost" onClick={() => navigator.clipboard?.writeText(`${window.location.origin}/overlay/${slug}`)}>
-              Copy Slug URL
-            </Button>
-          )}
+          <Button variant="ghost" onClick={() => copyText(slugUrl, 'Slug URL berhasil disalin!')}>
+            Copy Slug URL
+          </Button>
           <Button variant="gold" onClick={handleExport} loading={exporting}>
             <Download size={16} /> Download PNG
           </Button>

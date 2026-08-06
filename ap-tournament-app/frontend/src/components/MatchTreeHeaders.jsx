@@ -1,6 +1,6 @@
 /**
  * Tree/branch match column headers.
- * CR Biasa: MATCH n → PTS | KILL (wide branch spanning both columns)
+ * CR Biasa: MATCH n → PTS | KILL (verticals at 25% & 75% = column centers)
  * CR League: MATCH n → TOTAL
  */
 export function matchColumnCount(totalMatches, mode) {
@@ -32,19 +32,20 @@ export function MatchTreeHeaders({ matchNumbers, mode, compact = false }) {
   return matchNumbers.map((n) => (
     <div
       key={n}
-      className="col-span-2 flex w-full flex-col items-center border-r border-white/15 px-0.5 pb-0.5 last:border-r-0"
+      className="col-span-2 flex w-full flex-col items-center border-r border-white/15 px-1 pb-0.5 last:border-r-0"
     >
       <span className={titleCls}>MATCH {n}</span>
-      <svg viewBox="0 0 100 12" className="mt-0.5 h-3 w-full" preserveAspectRatio="none" aria-hidden>
+      {/* Branch tips at 25 & 75 = exact centers of PTS | KILL columns */}
+      <svg viewBox="0 0 100 14" className="mt-0.5 h-3.5 w-full px-0.5" preserveAspectRatio="none" aria-hidden>
         <path
-          d="M50 0 V5 M50 5 H12 M50 5 H88 M12 5 V11 M88 5 V11"
+          d="M50 1 V6 M50 6 H25 M50 6 H75 M25 6 V13 M75 6 V13"
           fill="none"
-          stroke="rgba(251,191,36,0.7)"
-          strokeWidth="1.5"
+          stroke="rgba(251,191,36,0.75)"
+          strokeWidth="1.4"
           vectorEffect="non-scaling-stroke"
         />
       </svg>
-      <div className="grid w-full grid-cols-2 gap-0.5 text-center">
+      <div className="grid w-full grid-cols-2 gap-0 text-center">
         <span className={`${labelCls} text-emerald-300/90`}>PTS</span>
         <span className={`${labelCls} text-cyan-300/90`}>KILL</span>
       </div>
