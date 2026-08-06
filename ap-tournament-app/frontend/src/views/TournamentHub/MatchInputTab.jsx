@@ -324,7 +324,8 @@ export default function MatchInputTab() {
         type: 'success',
       });
     } catch (err) {
-      setToast({ message: err.message, type: 'error' });
+      setToast({ message: `Gagal Submit: ${err.message}`, type: 'error' });
+      throw err; // biarkan modal tetap di Step 3 + tampilkan error
     } finally {
       setSubmitting(false);
     }
@@ -352,17 +353,26 @@ export default function MatchInputTab() {
 
       <ManualInputModal
         open={manualOpen}
-        onClose={() => setManualOpen(false)}
+        onClose={async () => {
+          setManualOpen(false);
+          // Hard refresh master teams only after modal closed
+          try { await refresh(); } catch { /* ignore */ }
+        }}
         imageUrls={previews}
         teams={teams}
-        tournament={{ ...tournament, inputMode }}
+        tournament={tournament}
+        inputMode={inputMode}
         initialRows={manualInitialRows}
         nicknames={nicknames}
         teamGroups={teamGroups}
         startStep={startStep}
         onSubmit={applyResults}
         submitting={submitting}
-        onTeamsUpdated={async () => { await refresh(); }}
+        onTeamsUpdated={async (_team, opts) => {
+          // Soft: jangan full refresh saat modal terbuka (itu yang reset dropdown)
+          if (opts?.soft) return;
+          try { await refresh(); } catch { /* ignore */ }
+        }}
       />
 
       <div className="glass-panel rounded-2xl p-6">

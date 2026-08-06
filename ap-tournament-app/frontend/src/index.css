@@ -46,6 +46,33 @@ body {
   transition: background-color 0.2s ease, color 0.2s ease;
 }
 
+/* OBS Browser Source: no scrollbars, fill canvas */
+html.obs-overlay-page,
+body.obs-overlay-page {
+  margin: 0 !important;
+  padding: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  max-height: 100vh !important;
+  overflow: hidden !important;
+  background: transparent !important;
+}
+
+body.obs-overlay-page #root {
+  width: 100% !important;
+  height: 100% !important;
+  max-height: 100vh !important;
+  overflow: hidden !important;
+}
+
+.obs-overlay-root {
+  box-sizing: border-box;
+  width: 100vw;
+  height: 100vh;
+  max-height: 100vh;
+  overflow: hidden !important;
+}
+
 .font-display {
   font-family: var(--font-display);
 }

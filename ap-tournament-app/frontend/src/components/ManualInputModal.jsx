@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import {
   X, MagnifyingGlassPlus, MagnifyingGlassMinus, ArrowCounterClockwise,
   ArrowsOut, CaretLeft, CaretRight, Plus,
@@ -46,6 +46,77 @@ function buildEmptyRows(scoringRules) {
       nicknames: [],
     };
   });
+}
+
+function norm(s) {
+  return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+/** Fuzzy: exact, substring, or shared prefix (≥3 chars) */
+function nickSimilar(a, b) {
+  if (!a || !b) return 0;
+  if (a === b) return 100;
+  if (a.length >= 3 && b.length >= 3) {
+    if (a.includes(b) || b.includes(a)) return 85;
+    const len = Math.min(a.length, b.length, 4);
+    if (a.slice(0, len) === b.slice(0, len)) return 70;
+  }
+  return 0;
+}
+
+/**
+ * Score OCR group vs master team.
+ * Match by roster nicknames OR team name (fuzzy) — not requiring identical names.
+ */
+export function scoreTeamMatch(ocrNicknames, team) {
+  const ocrNorms = [...new Set((ocrNicknames || []).map(norm).filter(Boolean))];
+  if (!ocrNorms.length || !team) return 0;
+
+  const teamNorm = norm(team.name);
+  const rosterNorms = [...new Set(
+    (team.players || []).map((p) => norm(p.nickname || p.name || p)).filter(Boolean)
+  )];
+
+  let best = 0;
+
+  // Nickname OCR ↔ nama tim
+  ocrNorms.forEach((n) => {
+    best = Math.max(best, nickSimilar(n, teamNorm));
+  });
+
+  // Nickname OCR ↔ roster (termasuk cadangan)
+  let rosterHits = 0;
+  let rosterBest = 0;
+  ocrNorms.forEach((n) => {
+    let hit = 0;
+    rosterNorms.forEach((r) => {
+      hit = Math.max(hit, nickSimilar(n, r));
+    });
+    if (hit >= 70) rosterHits += 1;
+    rosterBest = Math.max(rosterBest, hit);
+  });
+
+  if (rosterHits >= 2) best = Math.max(best, 92 + rosterHits);
+  else if (rosterHits === 1) best = Math.max(best, 78);
+  else best = Math.max(best, rosterBest >= 85 ? 75 : 0);
+
+  return best;
+}
+
+function findBestTeam(ocrNicknames, teamsList, usedTeamIds = new Set()) {
+  let best = null;
+  let bestScore = 0;
+  (teamsList || []).forEach((t) => {
+    if (usedTeamIds.has(String(t._id))) return;
+    const score = scoreTeamMatch(ocrNicknames, t);
+    if (score > bestScore) {
+      bestScore = score;
+      best = t;
+    }
+  });
+  // Auto-select hanya jika cukup yakin
+  if (bestScore >= 70) return { team: best, score: bestScore };
+  return { team: null, score: bestScore };
 }
 
 function ImageViewer({ imageUrls = [], activeIndex = 0, onSelectImage }) {
@@ -139,6 +210,7 @@ export default function ManualInputModal({
   imageUrls,
   teams = [],
   tournament,
+  inputMode: inputModeProp,
   initialRows,
   nicknames = [],
   teamGroups = [],
@@ -147,11 +219,16 @@ export default function ManualInputModal({
   submitting,
   onTeamsUpdated,
 }) {
-  const scoringRules = useMemo(() => getScoringRules(tournament), [tournament]);
+  const scoringRules = useMemo(
+    () => getScoringRules(tournament),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [tournament?._id, tournament?.scoringRules, tournament?.inputMode]
+  );
   const urls = imageUrls?.length ? imageUrls : (imageUrl ? [imageUrl] : []);
   const killPt = scoringRules.killPoint ?? 1;
-  const isLeague = (tournament?.inputMode || 'cr_biasa') === 'cr_league';
+  const isLeague = (inputModeProp || tournament?.inputMode || 'cr_biasa') === 'cr_league';
   const mode = isLeague ? 'cr_league' : 'cr_biasa';
+  const tournamentId = tournament?._id;
 
   const [step, setStep] = useState(startStep);
   const [rows, setRows] = useState(() => buildEmptyRows(scoringRules));
@@ -159,23 +236,101 @@ export default function ManualInputModal({
   const [activeImg, setActiveImg] = useState(0);
   const [fullscreen, setFullscreen] = useState(false);
   const [creatingIdx, setCreatingIdx] = useState(null);
-  const [newTeamName, setNewTeamName] = useState('');
   const [creating, setCreating] = useState(false);
   const [localTeams, setLocalTeams] = useState(teams);
   const [toastMsg, setToastMsg] = useState('');
+  const [toastError, setToastError] = useState(false);
 
-  useEffect(() => {
-    setLocalTeams(teams);
-  }, [teams]);
+  // Session lock: only full-init when modal opens (false → true)
+  const wasOpenRef = useRef(false);
+  const initPayloadRef = useRef(null);
 
+  const showToast = (msg, isError = false) => {
+    setToastMsg(msg);
+    setToastError(isError);
+  };
+
+  /** Merge parent teams into local list WITHOUT wiping selections */
   useEffect(() => {
     if (!open) return;
+    setLocalTeams((prev) => {
+      const map = new Map(prev.map((t) => [String(t._id), t]));
+      (teams || []).forEach((t) => map.set(String(t._id), t));
+      return Array.from(map.values());
+    });
+  }, [teams, open]);
+
+  const buildGroupsFromProps = useCallback((teamsList) => {
+    let groups = [];
+    if (teamGroups?.length) {
+      groups = teamGroups.map((g) => ({
+        placement: g.placement,
+        kills: g.kills || 0,
+        nicknames: g.nicknames || (g.players || []).map((p) => p.nickname || p).filter(Boolean),
+        players: g.players || [],
+        teamId: g.teamId || '',
+        teamName: g.teamName || '',
+        draftName: '',
+      }));
+    } else if (initialRows?.length) {
+      groups = initialRows
+        .filter((r) => r.placement || r.nickname || r.teamName || (r.players || []).length)
+        .map((r) => {
+          const nicks = nickListFromRow(r);
+          return {
+            placement: r.placement,
+            kills: r.kills || 0,
+            nicknames: nicks,
+            players: r.players || nicks.map((n) => ({ nickname: n })),
+            teamId: r.teamId || '',
+            teamName: r.teamName || r.matchedTeamName || '',
+            draftName: '',
+          };
+        });
+    } else if (nicknames?.length) {
+      const byPlace = new Map();
+      nicknames.forEach((n) => {
+        const place = n.placements?.[0] || 0;
+        if (!byPlace.has(place)) byPlace.set(place, { placement: place || null, kills: 0, nicknames: [], players: [] });
+        const g = byPlace.get(place);
+        g.nicknames.push(n.nickname);
+        g.players.push({ nickname: n.nickname, kills: n.kills || 0 });
+        g.kills = Math.max(g.kills, n.kills || 0);
+      });
+      groups = Array.from(byPlace.values()).map((g) => ({ ...g, teamId: '', teamName: '', draftName: '' }));
+    }
+
+    // Fuzzy auto-match; 1 tim = 1 slot
+    const used = new Set();
+    return groups.map((g) => {
+      if (g.teamId) {
+        used.add(String(g.teamId));
+        return g;
+      }
+      const { team } = findBestTeam(g.nicknames, teamsList, used);
+      if (!team) return g;
+      used.add(String(team._id));
+      return { ...g, teamId: team._id, teamName: team.name };
+    });
+  }, [teamGroups, initialRows, nicknames]);
+
+  // Full init ONLY when modal opens
+  useEffect(() => {
+    if (!open) {
+      wasOpenRef.current = false;
+      return;
+    }
+    if (wasOpenRef.current) return; // already initialized this session
+    wasOpenRef.current = true;
+
     const rules = getScoringRules(tournament);
+    const teamsSnapshot = teams || [];
+    setLocalTeams(teamsSnapshot);
     setStep(startStep);
     setActiveImg(0);
     setCreatingIdx(null);
-    setNewTeamName('');
     setToastMsg('');
+    setToastError(false);
 
     const base = buildEmptyRows(rules);
     if (initialRows?.length) {
@@ -199,96 +354,39 @@ export default function ManualInputModal({
     }
     setRows(base);
 
-    // Build team groups: 4 nicknames = 1 unit (never split per-player)
-    let groups = [];
-    if (teamGroups?.length) {
-      groups = teamGroups.map((g) => ({
-        placement: g.placement,
-        kills: g.kills || 0,
-        nicknames: g.nicknames || (g.players || []).map((p) => p.nickname || p).filter(Boolean),
-        players: g.players || [],
-        teamId: '',
-        teamName: '',
-        draftName: '',
-      }));
-    } else if (initialRows?.length) {
-      groups = initialRows
-        .filter((r) => r.placement || r.nickname || r.teamName || (r.players || []).length)
-        .map((r) => {
-          const nicks = nickListFromRow(r);
-          return {
-            placement: r.placement,
-            kills: r.kills || 0,
-            nicknames: nicks,
-            players: r.players || nicks.map((n) => ({ nickname: n })),
-            teamId: r.teamId || '',
-            teamName: r.teamName || r.matchedTeamName || '',
-            draftName: '',
-          };
-        });
-    } else if (nicknames?.length) {
-      // Legacy flat nicknames → group by placement
-      const byPlace = new Map();
-      nicknames.forEach((n) => {
-        const place = n.placements?.[0] || 0;
-        if (!byPlace.has(place)) byPlace.set(place, { placement: place || null, kills: 0, nicknames: [], players: [] });
-        const g = byPlace.get(place);
-        g.nicknames.push(n.nickname);
-        g.players.push({ nickname: n.nickname, kills: n.kills || 0 });
-        g.kills = Math.max(g.kills, n.kills || 0);
-      });
-      groups = Array.from(byPlace.values());
-    }
-
-    // Auto-match each group to roster by nickname overlap (≥2 hits)
-    const matchedGroups = groups.map((g) => {
-      if (g.teamId) return g;
-      const ocrNorms = [...new Set(
-        (g.nicknames || []).map((n) => n.toLowerCase().replace(/[^a-z0-9]/g, '')).filter(Boolean)
-      )];
-      let best = null;
-      let bestScore = 0;
-      localTeams.forEach((t) => {
-        const roster = (t.players || []).map((p) => (p.nickname || '').toLowerCase().replace(/[^a-z0-9]/g, '')).filter(Boolean);
-        const nameNorm = t.name.toLowerCase().replace(/[^a-z0-9]/g, '');
-        let score = 0;
-        const hits = ocrNorms.filter((n) => roster.some((r) => r === n || (r.length > 2 && (r.includes(n) || n.includes(r))))).length;
-        if (hits >= 2) score = 90 + hits * 2;
-        if (nameNorm && ocrNorms.some((n) => n === nameNorm || (nameNorm.length >= 3 && n.includes(nameNorm)))) {
-          score = Math.max(score, 95);
-        }
-        if (score > bestScore) { bestScore = score; best = t; }
-      });
-      if (!best || bestScore < 70) return g;
-      return {
-        ...g,
-        teamId: best._id,
-        teamName: best.name,
-      };
-    });
-    setGroupMap(matchedGroups);
+    const matched = buildGroupsFromProps(teamsSnapshot);
+    setGroupMap(matched);
+    initPayloadRef.current = { startStep, rowsLen: initialRows?.length || 0 };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, initialRows, nicknames, teamGroups, startStep, tournament]);
+  }, [open]);
 
-  // Re-match when teams list grows (after create) — ≥2 roster hits
-  useEffect(() => {
-    if (!open || !localTeams.length) return;
-    setGroupMap((prev) => prev.map((g) => {
-      if (g.teamId) return g;
-      const ocrNorms = [...new Set(
-        (g.nicknames || []).map((n) => n.toLowerCase().replace(/[^a-z0-9]/g, '')).filter(Boolean)
-      )];
-      let best = null;
-      let bestHits = 0;
-      localTeams.forEach((t) => {
-        const roster = (t.players || []).map((p) => (p.nickname || '').toLowerCase().replace(/[^a-z0-9]/g, '')).filter(Boolean);
-        const hits = ocrNorms.filter((n) => roster.some((r) => r === n || (r.length > 2 && (r.includes(n) || n.includes(r))))).length;
-        if (hits > bestHits) { bestHits = hits; best = t; }
-      });
-      if (!best || bestHits < 2) return g;
-      return { ...g, teamId: best._id, teamName: best.name };
-    }));
-  }, [localTeams, open]);
+  const findDuplicateTeam = (teamId, excludeIndex, source = 'group') => {
+    if (!teamId) return null;
+    const id = String(teamId);
+    if (source === 'group') {
+      const hit = groupMap.find((g, j) => j !== excludeIndex && String(g.teamId) === id);
+      return hit ? hit.placement : null;
+    }
+    const hit = rows.find((r, j) => j !== excludeIndex && String(r.teamId) === id);
+    return hit ? hit.placement : null;
+  };
+
+  const assignGroupTeam = (groupIdx, teamId, teamName) => {
+    if (teamId) {
+      const dupRank = findDuplicateTeam(teamId, groupIdx, 'group');
+      if (dupRank != null) {
+        showToast(`Tim ${teamName || 'ini'} sudah ditautkan di Rank #${dupRank}!`, true);
+        setGroupMap((prev) => prev.map((row, j) =>
+          j === groupIdx ? { ...row, teamId: '', teamName: '' } : row
+        ));
+        return false;
+      }
+    }
+    setGroupMap((prev) => prev.map((row, j) =>
+      j === groupIdx ? { ...row, teamId: teamId || '', teamName: teamName || '' } : row
+    ));
+    return true;
+  };
 
   const applyGroupMapToRows = () => {
     setRows((prev) => {
@@ -325,6 +423,16 @@ export default function ManualInputModal({
 
   const onTeamSelect = (idx, teamId) => {
     const team = localTeams.find((t) => t._id === teamId);
+    if (teamId) {
+      const dupRank = findDuplicateTeam(teamId, idx, 'rows');
+      if (dupRank != null) {
+        showToast(`Tim ${team?.name || 'ini'} sudah ditautkan di Rank #${dupRank}!`, true);
+        setRows((prev) => prev.map((r, i) =>
+          i === idx ? { ...r, teamId: '', teamName: '' } : r
+        ));
+        return;
+      }
+    }
     setRows((prev) => prev.map((r, i) =>
       i === idx ? { ...r, teamId, teamName: team?.name || '' } : r
     ));
@@ -332,35 +440,56 @@ export default function ManualInputModal({
 
   const createTeamFromGroup = async (groupIdx) => {
     const g = groupMap[groupIdx];
-    const name = (g.draftName || newTeamName || '').trim();
+    const name = (g.draftName || '').trim();
     if (!name) {
-      setToastMsg('Isi nama tim dulu (mis. EXC)');
+      showToast('Isi nama tim dulu (mis. EXC)', true);
       return;
     }
-    if (!tournament?._id) return;
+    if (!tournamentId) return;
+
+    // Duplikat nama lokal
+    const nameDup = groupMap.find((row, j) =>
+      j !== groupIdx && row.teamName && row.teamName.toLowerCase() === name.toLowerCase() && row.teamId
+    );
+    if (nameDup) {
+      showToast(`Tim "${name}" sudah ditautkan di Rank #${nameDup.placement}!`, true);
+      return;
+    }
+
     setCreating(true);
-    setToastMsg('');
+    showToast('');
     try {
       const players = (g.nicknames || []).slice(0, 6).map((n) => ({ nickname: n }));
-      const team = await api.upsertTeam(tournament._id, {
+      const team = await api.upsertTeam(tournamentId, {
         name,
         players,
         representative: players[0]?.nickname || '',
         merge: true,
       });
+
+      // 1) Add to local list first
       setLocalTeams((prev) => {
-        const exists = prev.some((t) => t._id === team._id);
-        return exists ? prev.map((t) => (t._id === team._id ? team : t)) : [...prev, team];
+        const exists = prev.some((t) => String(t._id) === String(team._id));
+        return exists
+          ? prev.map((t) => (String(t._id) === String(team._id) ? team : t))
+          : [...prev, team];
       });
+
+      // 2) Lock selection on THIS slot immediately (before any parent refresh)
       setGroupMap((prev) => prev.map((row, j) =>
-        j === groupIdx ? { ...row, teamId: team._id, teamName: team.name, draftName: '' } : row
+        j === groupIdx
+          ? { ...row, teamId: team._id, teamName: team.name, draftName: '' }
+          : row
       ));
       setCreatingIdx(null);
-      setNewTeamName('');
-      setToastMsg(`Tim "${team.name}" dibuat + roster ${players.length} nick`);
-      await onTeamsUpdated?.(team);
+      showToast(`Tim "${team.name}" dibuat + roster ${players.length} nick`);
+
+      // Soft notify parent — must NOT wipe modal state
+      try {
+        await onTeamsUpdated?.(team, { soft: true });
+      } catch { /* ignore */ }
     } catch (err) {
-      setToastMsg(err.message || 'Gagal buat tim');
+      showToast(err.message || 'Gagal buat tim', true);
     } finally {
       setCreating(false);
     }
@@ -373,15 +502,55 @@ export default function ManualInputModal({
 
   const goNext = () => {
     if (step === 1) {
+      // Warn duplicates before leaving step 1
+      const seen = new Map();
+      for (const g of groupMap) {
+        if (!g.teamId) continue;
+        const id = String(g.teamId);
+        if (seen.has(id)) {
+          showToast(`Tim ${g.teamName} sudah ditautkan di Rank #${seen.get(id)}!`, true);
+          return;
+        }
+        seen.set(id, g.placement);
+      }
       applyGroupMapToRows();
       setStep(2);
+      showToast('');
     } else if (step === 2) {
       setStep(3);
     }
   };
 
   const handleSubmit = () => {
-    const payload = filledRows.map((r) => {
+    // Stay on step 3 — validate, never force back to step 1
+    const linked = rows.filter((r) => r.teamId || r.teamName);
+    if (!linked.length) {
+      showToast('Gagal Submit: belum ada rank yang ditautkan ke Tim!', true);
+      return;
+    }
+
+    const seen = new Map();
+    const dups = [];
+    linked.forEach((r) => {
+      if (!r.teamId) return;
+      const id = String(r.teamId);
+      if (seen.has(id)) dups.push(`#${r.placement} & #${seen.get(id)} (${r.teamName})`);
+      else seen.set(id, r.placement);
+    });
+    if (dups.length) {
+      showToast(`Gagal Submit: Tim duplikat di Rank ${dups.join(', ')}`, true);
+      return;
+    }
+
+    const withScore = linked.filter((r) => r.kills === '' || r.kills == null);
+    if (withScore.length && isLeague) {
+      showToast(
+        `Peringatan: Rank ${withScore.map((r) => `#${r.placement}`).join(', ')} belum punya SCORE — tetap dikirim sebagai 0`,
+        true
+      );
+    }
+
+    const payload = linked.map((r) => {
       const kills = parseInt(r.kills, 10) || 0;
       const placementPoints = isLeague
         ? 0
@@ -407,7 +576,14 @@ export default function ManualInputModal({
         nicknames: nicks,
       };
     });
-    onSubmit(payload);
+
+    showToast('Mengirim ke leaderboard…');
+    Promise.resolve(onSubmit(payload)).then(() => {
+      // Parent closes modal on success
+    }).catch((err) => {
+      showToast(`Gagal Submit: ${err?.message || 'unknown error'}`, true);
+      // Tetap di Step 3 — jangan reset ke Step 1
+    });
   };
 
   if (!open) return null;
@@ -460,14 +636,18 @@ export default function ManualInputModal({
           <div className="flex flex-1 flex-col overflow-hidden">
             <div className="flex-1 overflow-y-auto p-4">
               {toastMsg && (
-                <p className="mb-3 rounded-lg bg-emerald/15 px-3 py-2 text-xs text-emerald">{toastMsg}</p>
+                <p className={`mb-3 rounded-lg px-3 py-2 text-xs ${
+                  toastError ? 'bg-crimson/20 text-red-300' : 'bg-emerald/15 text-emerald'
+                }`}>
+                  {toastMsg}
+                </p>
               )}
 
               {step === 1 && (
                 <div className="space-y-3">
                   <p className="text-xs text-slate-400">
                     Setiap baris = <strong className="text-white">1 tim (hingga 4 nickname)</strong>.
-                    Pilih tim terdaftar atau buat tim baru langsung di sini — roster otomatis terisi.
+                    1 tim hanya boleh 1 rank. Auto-match fuzzy dari roster/nama.
                   </p>
                   {groupMap.length === 0 ? (
                     <p className="rounded-xl bg-slate-800/50 p-4 text-sm text-slate-500">
@@ -476,7 +656,12 @@ export default function ManualInputModal({
                   ) : (
                     <div className="space-y-3">
                       {groupMap.map((g, i) => (
-                        <div key={i} className="rounded-xl border border-white/10 bg-slate-800/40 p-3">
+                        <div
+                          key={`g-${g.placement}-${i}`}
+                          className={`rounded-xl border p-3 ${
+                            g.teamId ? 'border-emerald/30 bg-slate-800/40' : 'border-white/10 bg-slate-800/40'
+                          }`}
+                        >
                           <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                             <span className="text-xs font-bold text-amber-300">
                               #{g.placement || '—'} · {g.kills} {isLeague ? 'score' : 'kills'}
@@ -503,23 +688,25 @@ export default function ManualInputModal({
                           </div>
                           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                             <select
-                              value={g.teamId}
+                              value={g.teamId || ''}
                               onChange={async (e) => {
-                                const team = localTeams.find((t) => t._id === e.target.value);
-                                setGroupMap((prev) => prev.map((row, j) =>
-                                  j === i ? { ...row, teamId: e.target.value, teamName: team?.name || '' } : row
-                                ));
-                                // Sync OCR nicks → master roster (merge, max 6)
-                                if (team && tournament?._id && (g.nicknames || []).length) {
+                                const teamId = e.target.value;
+                                const team = localTeams.find((t) => String(t._id) === String(teamId));
+                                const ok = assignGroupTeam(i, teamId, team?.name || '');
+                                if (!ok || !team || !tournamentId) return;
+                                // Sync roster silently — do not refresh parent hard
+                                if ((g.nicknames || []).length) {
                                   try {
-                                    const updated = await api.upsertTeam(tournament._id, {
+                                    const updated = await api.upsertTeam(tournamentId, {
                                       teamId: team._id,
                                       name: team.name,
                                       players: (g.nicknames || []).map((n) => ({ nickname: n })),
                                       merge: true,
                                     });
-                                    setLocalTeams((prev) => prev.map((t) => (t._id === updated._id ? updated : t)));
-                                    await onTeamsUpdated?.(updated);
+                                    setLocalTeams((prev) => prev.map((t) =>
+                                      String(t._id) === String(updated._id) ? updated : t
+                                    ));
+                                    await onTeamsUpdated?.(updated, { soft: true });
                                   } catch { /* non-fatal */ }
                                 }
                               }}
@@ -541,6 +728,9 @@ export default function ManualInputModal({
                                   placeholder="Nama tim (EXC)"
                                   className="min-w-0 flex-1 rounded-lg border border-emerald/40 bg-slate-900 px-2 py-1.5 text-sm text-white"
                                   autoFocus
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') createTeamFromGroup(i);
+                                  }}
                                 />
                                 <Button
                                   variant="success"
@@ -660,7 +850,7 @@ export default function ManualInputModal({
                                       )}
                                     </div>
                                     <select
-                                      value={row.teamId}
+                                      value={row.teamId || ''}
                                       onChange={(e) => onTeamSelect(idx, e.target.value)}
                                       className="w-full min-w-[110px] rounded-lg border border-white/10 bg-slate-900 px-2 py-1.5 text-xs text-white"
                                     >
@@ -724,9 +914,9 @@ export default function ManualInputModal({
 
             <div className="flex flex-wrap items-center justify-between gap-2 border-t border-white/10 p-4">
               <div className="flex gap-2">
-                <Button variant="ghost" onClick={onClose}>Cancel</Button>
+                <Button variant="ghost" onClick={onClose} disabled={submitting}>Cancel</Button>
                 {step > 1 && (
-                  <Button variant="ghost" onClick={() => setStep((s) => Math.max(1, s - 1))}>
+                  <Button variant="ghost" onClick={() => setStep((s) => Math.max(1, s - 1))} disabled={submitting}>
                     <CaretLeft size={16} /> Back
                   </Button>
                 )}
@@ -737,8 +927,13 @@ export default function ManualInputModal({
                     Next <CaretRight size={16} />
                   </Button>
                 ) : (
-                  <Button variant="success" onClick={handleSubmit} loading={submitting} disabled={filledRows.length === 0}>
-                    Apply to Leaderboard
+                  <Button
+                    variant="success"
+                    onClick={handleSubmit}
+                    loading={submitting}
+                    disabled={submitting || filledRows.length === 0}
+                  >
+                    {submitting ? 'Mengirim…' : 'Apply to Leaderboard'}
                   </Button>
                 )}
               </div>

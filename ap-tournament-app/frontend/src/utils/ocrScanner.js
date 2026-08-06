@@ -252,9 +252,20 @@ function uniqueNorms(list) {
   return out;
 }
 
+function nickSimilar(a, b) {
+  if (!a || !b) return 0;
+  if (a === b) return 100;
+  if (a.length >= 3 && b.length >= 3) {
+    if (a.includes(b) || b.includes(a)) return 85;
+    const len = Math.min(a.length, b.length, 4);
+    if (a.slice(0, len) === b.slice(0, len)) return 70;
+  }
+  return 0;
+}
+
 /**
  * Auto-match OCR placement → registered team.
- * Requires ≥2 roster nick hits (incl. substitutes 5–6) OR strong team-name match.
+ * Fuzzy: OCR nick ↔ roster nick OR team name. Empty if no confident match.
  */
 export function matchTeamsToRoster(ocrResults, registeredTeams) {
   return ocrResults.map((ocr) => {
@@ -266,6 +277,7 @@ export function matchTeamsToRoster(ocrResults, registeredTeams) {
 
     let bestMatch = null;
     let bestScore = 0;
+    const usedHint = new Set(); // filled by caller if needed — per-row for now
 
     (registeredTeams || []).forEach((team) => {
       const teamNorm = normNick(team.name);
@@ -274,24 +286,20 @@ export function matchTeamsToRoster(ocrResults, registeredTeams) {
       );
 
       let score = 0;
-      // Strong name match
-      if (teamNorm && ocrNicks.some((n) => n === teamNorm)) score = 100;
-      else if (teamNorm && teamNorm.length >= 3 && ocrNicks.some((n) => n.includes(teamNorm) || teamNorm.includes(n))) {
-        score = 80;
-      }
+      ocrNicks.forEach((n) => {
+        score = Math.max(score, nickSimilar(n, teamNorm));
+      });
 
-      // Roster memory: need ≥2 overlapping nicks for auto-select (incl. cadangan)
-      const rosterHits = ocrNicks.filter((n) =>
-        rosterNicks.some((r) =>
-          r === n || (r.length > 2 && n.length > 2 && (r.includes(n) || n.includes(r)))
-        )
-      ).length;
+      let rosterHits = 0;
+      ocrNicks.forEach((n) => {
+        let hit = 0;
+        rosterNicks.forEach((r) => { hit = Math.max(hit, nickSimilar(n, r)); });
+        if (hit >= 70) rosterHits += 1;
+        else if (hit >= 85) score = Math.max(score, hit);
+      });
 
-      if (rosterHits >= 2) {
-        score = Math.max(score, 90 + Math.min(rosterHits, 4) * 2);
-      } else if (rosterHits === 1 && score < 80) {
-        score = Math.max(score, 45); // weak — not enough alone for confident auto-select
-      }
+      if (rosterHits >= 2) score = Math.max(score, 92 + rosterHits);
+      else if (rosterHits === 1) score = Math.max(score, 78);
 
       if (score > bestScore) {
         bestScore = score;
@@ -299,7 +307,7 @@ export function matchTeamsToRoster(ocrResults, registeredTeams) {
       }
     });
 
-    // Only auto-bind when confidence is solid (≥70)
+    void usedHint;
     const confident = bestScore >= 70;
     return {
       ...ocr,
