@@ -60,12 +60,14 @@ export function aggregateStandings(matches, teams) {
       teamId: team._id,
       teamName: team.name,
       tag: team.tag,
+      logo: team.logo || '',
       totalPoints: 0,
       totalKills: 0,
       booyahCount: 0,
       matchesPlayed: 0,
       placements: [],
       matchScores: {},
+      matchBreakdown: {},
     };
   });
 
@@ -78,12 +80,14 @@ export function aggregateStandings(matches, teams) {
           standings[key] = {
             teamId: r.teamId,
             teamName: r.teamName,
+            logo: '',
             totalPoints: 0,
             totalKills: 0,
             booyahCount: 0,
             matchesPlayed: 0,
             placements: [],
             matchScores: {},
+            matchBreakdown: {},
           };
         }
         const s = standings[key];
@@ -93,6 +97,13 @@ export function aggregateStandings(matches, teams) {
         s.matchesPlayed += 1;
         s.placements.push(r.placement);
         s.matchScores[match.matchNumber] = r.totalPoints || 0;
+        s.matchBreakdown[match.matchNumber] = {
+          totalPoints: r.totalPoints || 0,
+          placementPoints: r.placementPoints || 0,
+          killPoints: r.killPoints || 0,
+          kills: r.kills || 0,
+          mode: r.mode || match.inputMode || 'cr_biasa',
+        };
       });
     });
 

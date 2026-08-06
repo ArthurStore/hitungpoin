@@ -29,6 +29,18 @@ const tournamentSchema = new mongoose.Schema(
       tournamentName: { x: { type: Number, default: 50 }, y: { type: Number, default: 58 } },
       date: { x: { type: Number, default: 50 }, y: { type: Number, default: 68 } },
     },
+    certificateStyle: {
+      displayFont: { type: String, default: 'Orbitron' },
+      bodyFont: { type: String, default: 'Montserrat' },
+      rankWeight: { type: String, default: '800' },
+      teamWeight: { type: String, default: '700' },
+      colors: {
+        rank: { type: String, default: '#F59E0B' },
+        team: { type: String, default: '#FFF7ED' },
+        tournament: { type: String, default: '#FCD34D' },
+        date: { type: String, default: '#A8A29E' },
+      },
+    },
     teams: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Team' }],
   },
   { timestamps: true }

@@ -5,28 +5,84 @@ const RANK_STYLES = {
   1: {
     badge: 'bg-gradient-to-br from-yellow-300 via-amber-400 to-yellow-600 text-black',
     row: 'from-amber-500/30 via-orange-600/40 to-red-900/50',
-    ring: 'ring-amber-400/40',
   },
   2: {
     badge: 'bg-gradient-to-br from-slate-200 via-slate-300 to-slate-500 text-black',
     row: 'from-slate-400/20 via-slate-600/30 to-slate-900/50',
-    ring: 'ring-slate-300/30',
   },
   3: {
     badge: 'bg-gradient-to-br from-amber-600 via-orange-700 to-amber-900 text-white',
     row: 'from-amber-700/25 via-orange-800/35 to-slate-900/50',
-    ring: 'ring-amber-700/30',
   },
 };
 
+/** 9:16 mobile story — padat untuk 15 tim */
 const POSTER_W = 540;
 const POSTER_H = 960;
+const MAX_TEAMS = 15;
 
-export default function OfficialLeaderboard({ tournament, standings, matches = [], boardRef }) {
+function MatchCell({ team, matchNo, mode }) {
+  const bd = team.matchBreakdown?.[matchNo];
+  const total = bd?.totalPoints ?? team.matchScores?.[matchNo];
+
+  if (total == null && !bd) {
+    return <span className="text-center font-mono text-[9px] text-slate-500">-</span>;
+  }
+
+  if (mode === 'cr_league') {
+    return (
+      <span className="text-center font-mono text-[10px] font-bold text-cyan-300">
+        {total ?? '-'}
+      </span>
+    );
+  }
+
+  // CR Biasa: Placement Pts | Kill Pts
+  const pp = bd?.placementPoints ?? 0;
+  const kp = bd?.killPoints ?? 0;
+  return (
+    <span className="flex flex-col items-center leading-tight">
+      <span className="font-mono text-[8px] font-semibold text-emerald">{pp}</span>
+      <span className="font-mono text-[7px] text-slate-400">{kp}k</span>
+    </span>
+  );
+}
+
+function TeamLogo({ logo, name }) {
+  const url = resolveAssetUrl(logo);
+  if (!url) {
+    return (
+      <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-sm bg-white/5 text-[8px] font-bold text-white/40">
+        {(name || '?').slice(0, 1)}
+      </div>
+    );
+  }
+  return (
+    <img
+      src={url}
+      alt=""
+      className="h-6 w-6 shrink-0 object-contain"
+      style={{ background: 'transparent', border: 'none', boxShadow: 'none' }}
+      crossOrigin="anonymous"
+    />
+  );
+}
+
+export default function OfficialLeaderboard({
+  tournament,
+  standings,
+  matches = [],
+  boardRef,
+  editable = false,
+  onEditMatchScore,
+}) {
   const totalMatches = tournament?.totalMatches || matches.length || 6;
   const matchNumbers = Array.from({ length: totalMatches }, (_, i) => i + 1);
   const subtitle = tournament?.leaderboardSubtitle || 'KLASEMEN GRAND FINAL';
   const logoUrl = resolveAssetUrl(tournament?.logo);
+  const mode = tournament?.inputMode || 'cr_biasa';
+  const rows = standings.slice(0, MAX_TEAMS);
+  const rowH = Math.floor(720 / Math.max(rows.length || 15, 15));
 
   return (
     <div className="mx-auto overflow-hidden rounded-2xl shadow-2xl ring-1 ring-white/10" style={{ width: POSTER_W }}>
@@ -40,15 +96,15 @@ export default function OfficialLeaderboard({ tournament, standings, matches = [
         }}
       >
         <div
-          className="absolute inset-x-0 top-0 h-48 opacity-40"
+          className="absolute inset-x-0 top-0 h-40 opacity-40"
           style={{ background: 'radial-gradient(ellipse at 50% 0%, #f59e0b 0%, transparent 70%)' }}
         />
 
-        <div className="relative z-10 px-5 pb-3 pt-6">
-          <div className="mb-4 flex items-center justify-between gap-3">
-            <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-black/50 ring-2 ring-white/15">
+        <div className="relative z-10 px-4 pb-2 pt-5">
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden">
               {logoUrl ? (
-                <img src={logoUrl} alt="Organizer" className="h-full w-full object-contain p-1" crossOrigin="anonymous" />
+                <img src={logoUrl} alt="Organizer" className="h-full w-full object-contain" crossOrigin="anonymous" style={{ background: 'transparent' }} />
               ) : (
                 <span className="text-[8px] font-bold uppercase text-white/40">LOGO</span>
               )}
@@ -56,73 +112,91 @@ export default function OfficialLeaderboard({ tournament, standings, matches = [
 
             <div className="min-w-0 flex-1 text-center">
               <h1
-                className="font-display text-lg font-black uppercase leading-tight tracking-wide text-white"
+                className="font-display text-xl font-black uppercase leading-tight tracking-wide text-white"
                 style={{ textShadow: '0 2px 12px rgba(0,0,0,0.8)' }}
               >
                 {subtitle}
               </h1>
-              <p className="mt-1 truncate text-[10px] font-semibold uppercase tracking-[0.25em] text-amber-400/90">
+              <p className="mt-0.5 truncate text-[11px] font-semibold uppercase tracking-[0.2em] text-amber-400/90">
                 {tournament?.name}
               </p>
             </div>
 
-            <div className="flex h-14 w-20 shrink-0 items-center justify-center rounded-xl bg-black/40 p-1 ring-2 ring-orange-500/25">
+            <div className="flex h-12 w-16 shrink-0 items-center justify-center">
               <img
-                src="/free-fire-logo.png"
+                src="/free-fire-logo.svg"
                 alt="Free Fire"
                 className="h-full w-full object-contain"
                 crossOrigin="anonymous"
+                style={{ background: 'transparent' }}
+                onError={(e) => { e.currentTarget.src = '/free-fire-logo.png'; }}
               />
             </div>
           </div>
 
           <div className="h-px bg-gradient-to-r from-transparent via-amber-500/50 to-transparent" />
+          <p className="mt-1 text-center text-[8px] uppercase tracking-widest text-slate-500">
+            {mode === 'cr_league' ? 'CR League · Total Score / Match' : 'CR Biasa · Place Pts | Kill Pts'}
+          </p>
         </div>
 
-        <div className="relative z-10 flex-1 overflow-hidden px-3 pb-4">
+        <div className="relative z-10 flex-1 overflow-hidden px-2.5 pb-2">
           <div
-            className="mb-2 grid gap-0.5 px-0.5 text-[8px] font-bold uppercase tracking-wider text-slate-400"
+            className="mb-1 grid items-center gap-0.5 px-0.5 text-[9px] font-bold uppercase tracking-wider text-slate-400"
             style={{
-              gridTemplateColumns: `22px minmax(0, 88px) repeat(${totalMatches}, minmax(0, 1fr)) 28px`,
+              gridTemplateColumns: `20px 28px minmax(0, 1fr) repeat(${totalMatches}, minmax(0, 1fr)) 34px`,
             }}
           >
             <span>#</span>
+            <span />
             <span className="truncate">Team</span>
             {matchNumbers.map((n) => <span key={n} className="text-center">M{n}</span>)}
             <span className="text-right">PTS</span>
           </div>
 
-          <div className="space-y-1">
-            {standings.length === 0 ? (
-              <p className="py-16 text-center text-xs text-white/30">Belum ada data klasemen</p>
-            ) : standings.slice(0, 12).map((team) => {
+          <div className="flex flex-col" style={{ gap: 2 }}>
+            {rows.length === 0 ? (
+              <p className="py-16 text-center text-sm text-white/30">Belum ada data klasemen</p>
+            ) : rows.map((team) => {
               const rs = RANK_STYLES[team.rank] || {
                 badge: 'bg-slate-800 text-white',
-                row: 'from-slate-800/50 to-slate-900/80',
-                ring: 'ring-white/5',
+                row: 'from-slate-800/60 to-slate-900/80',
               };
 
               return (
                 <div
                   key={team.teamId || team.teamName}
-                  className={`grid items-center gap-0.5 rounded-md bg-gradient-to-r px-0.5 py-0.5 ring-1 ${rs.row} ${rs.ring}`}
+                  className={`grid items-center gap-0.5 rounded-sm bg-gradient-to-r px-0.5 ${rs.row}`}
                   style={{
-                    gridTemplateColumns: `22px minmax(0, 88px) repeat(${totalMatches}, minmax(0, 1fr)) 28px`,
+                    gridTemplateColumns: `20px 28px minmax(0, 1fr) repeat(${totalMatches}, minmax(0, 1fr)) 34px`,
+                    minHeight: Math.max(28, Math.min(44, rowH)),
+                    height: Math.max(28, Math.min(44, rowH)),
                   }}
                 >
-                  <div className={`flex h-5 w-5 items-center justify-center rounded text-[9px] font-black ${rs.badge}`}>
+                  <div className={`flex h-5 w-5 items-center justify-center rounded text-[10px] font-black ${rs.badge}`}>
                     {team.rank}
                   </div>
-                  <p className="truncate text-[8px] font-bold uppercase leading-tight tracking-wide text-white" title={team.teamName}>
-                    {team.rank === 1 && <Fire size={8} weight="fill" className="mr-0.5 inline text-orange-300" />}
+                  <TeamLogo logo={team.logo} name={team.teamName} />
+                  <p className="truncate text-[11px] font-bold uppercase leading-tight tracking-wide text-white" title={team.teamName}>
+                    {team.rank === 1 && <Fire size={10} weight="fill" className="mr-0.5 inline text-orange-300" />}
                     {team.teamName}
                   </p>
                   {matchNumbers.map((n) => (
-                    <span key={n} className="text-center font-mono text-[7px] font-semibold text-slate-300">
-                      {team.matchScores?.[n] ?? '-'}
-                    </span>
+                    editable ? (
+                      <button
+                        key={n}
+                        type="button"
+                        onClick={() => onEditMatchScore?.(team, n)}
+                        className="rounded hover:bg-white/10"
+                        title={`Edit M${n}`}
+                      >
+                        <MatchCell team={team} matchNo={n} mode={mode} />
+                      </button>
+                    ) : (
+                      <MatchCell key={n} team={team} matchNo={n} mode={mode} />
+                    )
                   ))}
-                  <span className="text-right font-mono text-[8px] font-black text-amber-400">
+                  <span className="text-right font-mono text-[12px] font-black text-amber-400">
                     {team.totalPoints}
                   </span>
                 </div>
@@ -131,8 +205,8 @@ export default function OfficialLeaderboard({ tournament, standings, matches = [
           </div>
         </div>
 
-        <div className="relative z-10 border-t border-white/5 px-4 py-3 text-center">
-          <p className="font-display text-[9px] font-bold uppercase tracking-[0.35em] text-emerald/70">
+        <div className="relative z-10 border-t border-white/5 px-4 py-2 text-center">
+          <p className="font-display text-[10px] font-bold uppercase tracking-[0.35em] text-emerald/70">
             AP · Arthur Points
           </p>
         </div>

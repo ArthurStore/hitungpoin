@@ -15,6 +15,41 @@ const DEFAULT_PLACEHOLDERS = {
 
 const RANK_LABELS = { 1: 'JUARA 1', 2: 'JUARA 2', 3: 'JUARA 3' };
 
+const DISPLAY_FONTS = [
+  { id: 'Orbitron', label: 'Orbitron (eSports)' },
+  { id: 'Russo One', label: 'Russo One (Header)' },
+  { id: 'Rajdhani', label: 'Rajdhani (Display)' },
+];
+
+const BODY_FONTS = [
+  { id: 'Montserrat', label: 'Montserrat' },
+  { id: 'Poppins', label: 'Poppins' },
+  { id: 'Cinzel', label: 'Cinzel (Elegant)' },
+];
+
+const COLOR_PRESETS = {
+  'Gold Premium': {
+    rank: '#F59E0B', team: '#FFF7ED', tournament: '#FCD34D', date: '#A8A29E',
+  },
+  'Cyberpunk Neon': {
+    rank: '#22D3EE', team: '#E879F9', tournament: '#A3E635', date: '#94A3B8',
+  },
+  'Minimalist Dark': {
+    rank: '#F8FAFC', team: '#F1F5F9', tournament: '#CBD5E1', date: '#64748B',
+  },
+  'Minimalist Light': {
+    rank: '#0F172A', team: '#1E293B', tournament: '#334155', date: '#64748B',
+  },
+};
+
+const DEFAULT_STYLE = {
+  displayFont: 'Orbitron',
+  bodyFont: 'Montserrat',
+  colors: { ...COLOR_PRESETS['Gold Premium'] },
+  rankWeight: '800',
+  teamWeight: '700',
+};
+
 function loadImage(src) {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -25,7 +60,15 @@ function loadImage(src) {
   });
 }
 
-async function renderCertificate({ templateUrl, placeholders, teamName, rank, tournamentName, date }) {
+async function ensureFonts(fonts) {
+  if (!document.fonts?.load) return;
+  await Promise.all(
+    fonts.map((f) => document.fonts.load(`700 48px "${f}"`).catch(() => null))
+  );
+}
+
+async function renderCertificate({ templateUrl, placeholders, style, teamName, rank, tournamentName, date }) {
+  await ensureFonts([style.displayFont, style.bodyFont]);
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d');
 
@@ -42,17 +85,17 @@ async function renderCertificate({ templateUrl, placeholders, teamName, rank, to
     g.addColorStop(1, '#1E293B');
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.strokeStyle = '#F59E0B';
+    ctx.strokeStyle = style.colors.rank;
     ctx.lineWidth = 6;
     ctx.strokeRect(40, 40, canvas.width - 80, canvas.height - 80);
   }
 
-  const drawText = (text, pos, size, color = '#FFFFFF', weight = 'bold') => {
+  const drawText = (text, pos, size, color, fontFamily, weight = '700') => {
     if (!pos) return;
     const x = (pos.x / 100) * canvas.width;
     const y = (pos.y / 100) * canvas.height;
     ctx.fillStyle = color;
-    ctx.font = `${weight} ${size}px "Plus Jakarta Sans", Arial, sans-serif`;
+    ctx.font = `${weight} ${size}px "${fontFamily}", sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.shadowColor = 'rgba(0,0,0,0.55)';
@@ -61,10 +104,11 @@ async function renderCertificate({ templateUrl, placeholders, teamName, rank, to
     ctx.shadowBlur = 0;
   };
 
-  drawText(RANK_LABELS[rank] || `JUARA ${rank}`, placeholders.rank, Math.round(canvas.width * 0.035), '#F59E0B');
-  drawText(teamName, placeholders.teamName, Math.round(canvas.width * 0.045), '#FFFFFF');
-  drawText(tournamentName, placeholders.tournamentName, Math.round(canvas.width * 0.022), '#94A3B8', '600');
-  drawText(date, placeholders.date, Math.round(canvas.width * 0.018), '#64748B', '500');
+  const c = style.colors;
+  drawText(RANK_LABELS[rank] || `JUARA ${rank}`, placeholders.rank, Math.round(canvas.width * 0.038), c.rank, style.displayFont, style.rankWeight);
+  drawText(teamName, placeholders.teamName, Math.round(canvas.width * 0.048), c.team, style.bodyFont, style.teamWeight);
+  drawText(tournamentName, placeholders.tournamentName, Math.round(canvas.width * 0.024), c.tournament, style.bodyFont, '600');
+  drawText(date, placeholders.date, Math.round(canvas.width * 0.02), c.date, style.bodyFont, '500');
 
   return canvas.toDataURL('image/png');
 }
@@ -82,6 +126,11 @@ export default function CertificateTab() {
     ...DEFAULT_PLACEHOLDERS,
     ...(tournament?.certificatePlaceholders || {}),
   });
+  const [style, setStyle] = useState({
+    ...DEFAULT_STYLE,
+    ...(tournament?.certificateStyle || {}),
+    colors: { ...DEFAULT_STYLE.colors, ...(tournament?.certificateStyle?.colors || {}) },
+  });
   const [dragging, setDragging] = useState(null);
   const canvasRef = useRef(null);
 
@@ -92,6 +141,11 @@ export default function CertificateTab() {
   useEffect(() => {
     setTemplateUrl(tournament?.certificateTemplate || '');
     setPlaceholders({ ...DEFAULT_PLACEHOLDERS, ...(tournament?.certificatePlaceholders || {}) });
+    setStyle({
+      ...DEFAULT_STYLE,
+      ...(tournament?.certificateStyle || {}),
+      colors: { ...DEFAULT_STYLE.colors, ...(tournament?.certificateStyle?.colors || {}) },
+    });
   }, [tournament]);
 
   const onTemplateFile = async (file) => {
@@ -144,6 +198,10 @@ export default function CertificateTab() {
     };
   }, [dragging, onPointerMove]);
 
+  const applyPreset = (name) => {
+    setStyle((s) => ({ ...s, colors: { ...COLOR_PRESETS[name] } }));
+  };
+
   const saveLayout = async () => {
     setSaving(true);
     try {
@@ -155,13 +213,13 @@ export default function CertificateTab() {
           tournamentName: { x: placeholders.tournamentName.x, y: placeholders.tournamentName.y },
           date: { x: placeholders.date.x, y: placeholders.date.y },
         },
+        certificateStyle: style,
       });
-      // If still data URL, try keep local for render but warn
       if (templateUrl?.startsWith('data:')) {
-        setToast({ message: 'Layout disimpan. Upload template ke server gagal sebelumnya — render pakai preview lokal.', type: 'success' });
+        setToast({ message: 'Layout & style disimpan (template lokal).', type: 'success' });
       } else {
         await refresh?.();
-        setToast({ message: 'Template & posisi placeholder disimpan!', type: 'success' });
+        setToast({ message: 'Template, font & warna disimpan!', type: 'success' });
       }
     } catch (err) {
       setToast({ message: err.message, type: 'error' });
@@ -180,6 +238,7 @@ export default function CertificateTab() {
         const dataUrl = await renderCertificate({
           templateUrl,
           placeholders,
+          style,
           teamName: top[i].teamName,
           rank: i + 1,
           tournamentName: tournament.name,
@@ -197,6 +256,17 @@ export default function CertificateTab() {
   };
 
   const previewSrc = resolveAssetUrl(templateUrl);
+  const colorField = (key, label) => (
+    <label key={key} className="block text-xs text-slate-400">
+      {label}
+      <input
+        type="color"
+        value={style.colors[key]}
+        onChange={(e) => setStyle((s) => ({ ...s, colors: { ...s.colors, [key]: e.target.value } }))}
+        className="mt-1 h-9 w-full cursor-pointer rounded-lg border border-white/10 bg-slate-900"
+      />
+    </label>
+  );
 
   return (
     <div className="space-y-6">
@@ -204,8 +274,8 @@ export default function CertificateTab() {
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="font-bold text-white">Certificate Template Builder</h2>
-          <p className="text-xs text-slate-500">Upload desain Canva/Photoshop, drag placeholder, export PNG</p>
+          <h2 className="font-bold text-white light:text-slate-900">Certificate Template Builder</h2>
+          <p className="text-xs text-slate-500">Font eSports, color palette, drag placeholder, export PNG</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button variant="secondary" onClick={saveLayout} loading={saving}>Save Layout</Button>
@@ -241,31 +311,63 @@ export default function CertificateTab() {
                 className={`absolute z-10 -translate-x-1/2 -translate-y-1/2 cursor-grab rounded-lg border px-2 py-1 text-[10px] font-bold shadow-lg active:cursor-grabbing ${
                   dragging === key ? 'border-emerald bg-emerald text-white' : 'border-white/30 bg-black/70 text-white'
                 }`}
-                style={{ left: `${pos.x}%`, top: `${pos.y}%` }}
+                style={{ left: `${pos.x}%`, top: `${pos.y}%`, fontFamily: key === 'rank' ? style.displayFont : style.bodyFont }}
               >
                 [{pos.label || key}]
               </button>
             ))}
           </div>
-          <p className="mt-2 text-[11px] text-slate-500">Drag badge placeholder ke posisi teks pada desain kamu.</p>
         </div>
 
         <div className="space-y-4">
-          <div className="glass-panel rounded-2xl p-4 text-sm text-slate-400">
-            <p className="font-semibold text-white">Placeholders</p>
-            <ul className="mt-2 space-y-1 text-xs">
-              <li>• [Nama Juara / Team Name]</li>
-              <li>• [Peringkat / Rank #1–#3]</li>
-              <li>• [Nama Turnamen]</li>
-              <li>• [Tanggal]</li>
-            </ul>
-            {standings.length > 0 && (
-              <p className="mt-3 text-xs">Top 3: {standings.slice(0, 3).map((s) => s.teamName).join(', ')}</p>
-            )}
+          <div className="glass-panel space-y-4 rounded-2xl p-4">
+            <p className="font-semibold text-white">Typography</p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="text-xs text-slate-400">
+                Display / Header
+                <select
+                  value={style.displayFont}
+                  onChange={(e) => setStyle((s) => ({ ...s, displayFont: e.target.value }))}
+                  className="mt-1 w-full rounded-lg border border-white/10 bg-slate-900 px-3 py-2 text-sm text-white"
+                >
+                  {DISPLAY_FONTS.map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
+                </select>
+              </label>
+              <label className="text-xs text-slate-400">
+                Body / Nama Tim
+                <select
+                  value={style.bodyFont}
+                  onChange={(e) => setStyle((s) => ({ ...s, bodyFont: e.target.value }))}
+                  className="mt-1 w-full rounded-lg border border-white/10 bg-slate-900 px-3 py-2 text-sm text-white"
+                >
+                  {BODY_FONTS.map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
+                </select>
+              </label>
+            </div>
+
+            <p className="pt-2 font-semibold text-white">Color Palette</p>
+            <div className="flex flex-wrap gap-2">
+              {Object.keys(COLOR_PRESETS).map((name) => (
+                <button
+                  key={name}
+                  type="button"
+                  onClick={() => applyPreset(name)}
+                  className="rounded-full border border-white/10 bg-slate-800 px-3 py-1 text-[11px] font-semibold text-slate-200 hover:border-gold/40 hover:text-gold"
+                >
+                  {name}
+                </button>
+              ))}
+            </div>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              {colorField('rank', 'Rank')}
+              {colorField('team', 'Team Name')}
+              {colorField('tournament', 'Tournament')}
+              {colorField('date', 'Date')}
+            </div>
           </div>
 
           {certificates.length > 0 && (
-            <div className="grid gap-4 sm:grid-cols-1">
+            <div className="grid gap-4">
               {certificates.map((cert) => (
                 <div key={cert.rank} className="glass-panel overflow-hidden rounded-2xl">
                   <div className="border-b border-white/5 px-4 py-2">

@@ -1,11 +1,13 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { config } from './config/env.js';
 import { connectDatabase } from './config/database.js';
 import { UPLOADS_DIR } from './config/upload.js';
+import { initSocket } from './socket.js';
 import authRoutes from './routes/authRoutes.js';
 import tournamentRoutes from './routes/tournamentRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
@@ -17,6 +19,7 @@ dotenv.config();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
+const server = http.createServer(app);
 
 const corsOrigins = process.env.CORS_ORIGINS
   ? process.env.CORS_ORIGINS.split(',').map((o) => o.trim())
@@ -30,15 +33,16 @@ app.use('/uploads', express.static(UPLOADS_DIR));
 app.get('/', (_req, res) => {
   res.json({
     app: 'AP (Arthur Points) API',
-    version: '2.3.0',
+    version: '2.4.0',
     health: '/api/health',
     ocr: 'POST /api/ocr/scan (Gemini Vision)',
     admin: 'POST /api/admin/verify-pin (header: X-Admin-Pin)',
+    realtime: 'socket.io leaderboard:update',
   });
 });
 
 app.get('/api/health', (_req, res) => {
-  res.json({ status: 'ok', app: 'AP (Arthur Points)', version: '2.3.0', ocr: 'gemini-flash-latest' });
+  res.json({ status: 'ok', app: 'AP (Arthur Points)', version: '2.4.0', ocr: 'gemini-flash-latest' });
 });
 
 app.use('/api/auth', authRoutes);
@@ -55,9 +59,10 @@ app.use((err, _req, res, _next) => {
 
 async function start() {
   await connectDatabase();
+  initSocket(server);
   const host = process.env.HOST || '0.0.0.0';
-  app.listen(config.port, host, () => {
-    console.log(`AP Tournament API on http://${host}:${config.port}`);
+  server.listen(config.port, host, () => {
+    console.log(`AP Tournament API on http://${host}:${config.port} (socket.io enabled)`);
   });
 }
 

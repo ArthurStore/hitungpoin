@@ -1,5 +1,10 @@
 import mongoose from 'mongoose';
 
+const playerSnapshotSchema = new mongoose.Schema({
+  nickname: String,
+  kills: { type: Number, default: 0 },
+}, { _id: false });
+
 const resultSchema = new mongoose.Schema({
   teamId: { type: mongoose.Schema.Types.ObjectId, ref: 'Team' },
   teamName: String,
@@ -11,6 +16,8 @@ const resultSchema = new mongoose.Schema({
   totalPoints: { type: Number, default: 0 },
   isBooyah: { type: Boolean, default: false },
   mode: { type: String, enum: ['cr_biasa', 'cr_league'], default: 'cr_biasa' },
+  ocrNickname: String,
+  players: [playerSnapshotSchema],
 });
 
 const matchSchema = new mongoose.Schema(
@@ -21,6 +28,7 @@ const matchSchema = new mongoose.Schema(
     inputMode: { type: String, enum: ['cr_biasa', 'cr_league'], default: 'cr_biasa' },
     status: { type: String, enum: ['pending', 'verified'], default: 'pending' },
     results: [resultSchema],
+    screenshots: [String],
     ocrProcessed: { type: Boolean, default: false },
     verifiedAt: Date,
   },

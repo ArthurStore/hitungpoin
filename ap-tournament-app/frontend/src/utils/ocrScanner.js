@@ -36,14 +36,24 @@ export async function terminateWorker() {
 }
 
 export function parseGeminiResults(results) {
-  return (results || []).map((r) => ({
-    placement: r.placement || r.rank,
-    rank: r.rank || r.placement,
-    teamName: r.teamName || r.team_name || r.nickname || '',
-    nickname: r.nickname || r.teamName || r.team_name || '',
-    kills: parseInt(r.kills, 10) || 0,
-    totalScore: parseInt(r.kills, 10) || 0,
-  }));
+  return (results || []).map((r) => {
+    const players = Array.isArray(r.players)
+      ? r.players.map((p) => ({
+        nickname: p.nickname || p.name || '',
+        kills: parseInt(p.kills, 10) || 0,
+      })).filter((p) => p.nickname).slice(0, 4)
+      : [];
+    const nick = r.nickname || r.teamName || r.team_name || players[0]?.nickname || '';
+    return {
+      placement: r.placement || r.rank,
+      rank: r.rank || r.placement,
+      teamName: r.teamName || r.team_name || nick || '',
+      nickname: nick,
+      kills: parseInt(r.kills, 10) || 0,
+      totalScore: parseInt(r.kills, 10) || 0,
+      players: players.length ? players : (nick ? [{ nickname: nick, kills: parseInt(r.kills, 10) || 0 }] : []),
+    };
+  });
 }
 
 /** Legacy text parsers kept as secondary fallback if Gemini returns only text */
@@ -158,14 +168,21 @@ export function mergeMultiPassResults(allParsed) {
 export function extractNicknameList(allParsed) {
   const map = new Map();
   allParsed.forEach((r) => {
-    const n = (r.nickname || r.teamName || '').trim();
-    if (!n || n.length < 2) return;
-    const key = n.toLowerCase();
-    const prev = map.get(key) || { nickname: n, kills: 0, hits: 0, placements: [] };
-    prev.hits += 1;
-    prev.kills = Math.max(prev.kills, parseInt(r.kills, 10) || 0);
-    if (r.placement) prev.placements.push(r.placement);
-    map.set(key, prev);
+    const candidates = [
+      r.nickname || r.teamName,
+      ...((r.players || []).map((p) => p.nickname || p)),
+    ].filter(Boolean);
+
+    candidates.forEach((nRaw) => {
+      const n = String(nRaw).trim();
+      if (!n || n.length < 2) return;
+      const key = n.toLowerCase();
+      const prev = map.get(key) || { nickname: n, kills: 0, hits: 0, placements: [] };
+      prev.hits += 1;
+      prev.kills = Math.max(prev.kills, parseInt(r.kills, 10) || 0);
+      if (r.placement) prev.placements.push(r.placement);
+      map.set(key, prev);
+    });
   });
   return Array.from(map.values()).sort((a, b) => b.hits - a.hits);
 }

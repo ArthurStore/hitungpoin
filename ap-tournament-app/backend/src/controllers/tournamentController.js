@@ -4,6 +4,7 @@ import Tournament from '../models/Tournament.js';
 import Team from '../models/Team.js';
 import Match from '../models/Match.js';
 import { calcMatchPoints, aggregateStandings, parseRosterInput, MAPS } from '../utils/pointsCalc.js';
+import { emitLeaderboardUpdate } from '../socket.js';
 
 function buildMatchConfigs(totalMatches, matchConfigs) {
   if (matchConfigs?.length) return matchConfigs;
@@ -11,6 +12,42 @@ function buildMatchConfigs(totalMatches, matchConfigs) {
     matchNumber: i + 1,
     map: MAPS[i % MAPS.length],
   }));
+}
+
+async function broadcastStandings(tournamentId) {
+  try {
+    let tournament;
+    let standings;
+    let matches;
+    if (isMemoryStore()) {
+      tournament = memoryStore.getTournament(tournamentId);
+      matches = memoryStore.getMatches(tournamentId);
+      standings = aggregateStandings(matches, memoryStore.getTeams(tournamentId));
+    } else {
+      tournament = await Tournament.findById(tournamentId).lean();
+      const teams = await Team.find({ tournamentId });
+      matches = await Match.find({ tournamentId });
+      standings = aggregateStandings(matches, teams);
+    }
+    if (!tournament) return;
+    emitLeaderboardUpdate(tournamentId, {
+      tournament: {
+        _id: tournament._id,
+        name: tournament.name,
+        logo: tournament.logo,
+        format: tournament.format,
+        status: tournament.status,
+        totalMatches: tournament.totalMatches,
+        inputMode: tournament.inputMode,
+        leaderboardSubtitle: tournament.leaderboardSubtitle,
+      },
+      standings,
+      matches,
+      updatedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error('broadcastStandings', err.message);
+  }
 }
 
 export async function listMyTournaments(req, res) {
@@ -181,7 +218,7 @@ export async function getLeaderboard(req, res) {
 export async function submitMatchResults(req, res) {
   try {
     const { id } = req.params;
-    const { matchNumber, results, inputMode, ocrProcessed } = req.body;
+    const { matchNumber, results, inputMode, ocrProcessed, screenshots } = req.body;
     const mode = inputMode || 'cr_biasa';
 
     if (isMemoryStore()) {
@@ -192,10 +229,15 @@ export async function submitMatchResults(req, res) {
 
       const scored = calcMatchPoints(results, tournament.scoringRules, mode);
       const updated = memoryStore.updateMatch(match._id, {
-        results: scored, status: 'verified', inputMode: mode,
-        ocrProcessed: !!ocrProcessed, verifiedAt: new Date().toISOString(),
+        results: scored,
+        status: 'verified',
+        inputMode: mode,
+        ocrProcessed: !!ocrProcessed,
+        verifiedAt: new Date().toISOString(),
+        screenshots: Array.isArray(screenshots) ? screenshots.slice(0, 3) : (match.screenshots || []),
       });
       if (ocrProcessed) memoryStore.incrementOcrScans(1);
+      await broadcastStandings(id);
       return res.json(updated);
     }
 
@@ -206,12 +248,24 @@ export async function submitMatchResults(req, res) {
       booyahBonus: tournament.scoringRules?.booyahBonus,
     }, mode);
 
+    const patch = {
+      results: scored,
+      status: 'verified',
+      inputMode: mode,
+      ocrProcessed: !!ocrProcessed,
+      verifiedAt: new Date(),
+    };
+    if (Array.isArray(screenshots)) {
+      patch.screenshots = screenshots.slice(0, 3);
+    }
+
     const match = await Match.findOneAndUpdate(
       { tournamentId: id, matchNumber },
-      { results: scored, status: 'verified', inputMode: mode, ocrProcessed: !!ocrProcessed, verifiedAt: new Date() },
+      patch,
       { new: true }
     );
     if (!match) return res.status(404).json({ error: 'Match not found' });
+    await broadcastStandings(id);
     res.json(match);
   } catch (err) {
     res.status(500).json({ error: err.message });

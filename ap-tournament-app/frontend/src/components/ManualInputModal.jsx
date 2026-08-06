@@ -159,7 +159,10 @@ export default function ManualInputModal({
           teamName: r.teamName || r.matchedTeamName || '',
           ocrNickname: r.ocrNickname || r.nickname || r.teamName || '',
           kills: r.kills ?? '',
-          placementPoints: placementPtsFor(r.placement || idx + 1, rules),
+          placementPoints: r.placementPoints != null
+            ? r.placementPoints
+            : placementPtsFor(r.placement || idx + 1, rules),
+          players: r.players || [],
         };
       });
     }
@@ -232,6 +235,10 @@ export default function ManualInputModal({
     setRows((prev) => prev.map((r, i) => (i === idx ? { ...r, kills: value } : r)));
   };
 
+  const updateField = (idx, field, value) => {
+    setRows((prev) => prev.map((r, i) => (i === idx ? { ...r, [field]: value } : r)));
+  };
+
   const onTeamSelect = (idx, teamId) => {
     const team = teams.find((t) => t._id === teamId);
     setRows((prev) => prev.map((r, i) =>
@@ -256,7 +263,9 @@ export default function ManualInputModal({
   const handleSubmit = () => {
     const payload = filledRows.map((r) => {
       const kills = parseInt(r.kills, 10) || 0;
-      const placementPoints = placementPtsFor(r.placement, scoringRules);
+      const placementPoints = r.placementPoints != null && r.placementPoints !== ''
+        ? parseInt(r.placementPoints, 10) || 0
+        : placementPtsFor(r.placement, scoringRules);
       const total = calcLiveTotal({
         placement: r.placement,
         kills,
@@ -270,6 +279,8 @@ export default function ManualInputModal({
         placementPoints,
         totalPoints: total,
         totalScore: kills,
+        ocrNickname: r.ocrNickname || r.nickname || '',
+        players: r.players || [],
       };
     });
     onSubmit(payload);
@@ -377,11 +388,11 @@ export default function ManualInputModal({
                     {' '}<span className="font-mono text-emerald">Total = Kills × {killPt} + PlacementPts</span>
                   </p>
                   <div className="overflow-x-auto rounded-xl border border-white/5">
-                    <table className="w-full min-w-[480px] text-left text-sm">
+                    <table className="w-full min-w-[560px] text-left text-sm">
                       <thead>
                         <tr className="border-b border-white/10 bg-slate-800/40 text-[10px] uppercase tracking-wider text-slate-500">
                           <th className="w-16 px-2 py-2">Rank</th>
-                          <th className="px-2 py-2">Team</th>
+                          <th className="px-2 py-2">Nick / Team</th>
                           <th className="w-20 px-2 py-2">Kills</th>
                           <th className="w-24 px-2 py-2">Place Pts</th>
                           <th className="w-16 px-2 py-2 text-right">Total</th>
@@ -389,7 +400,9 @@ export default function ManualInputModal({
                       </thead>
                       <tbody>
                         {rows.map((row, idx) => {
-                          const pp = placementPtsFor(row.placement, scoringRules);
+                          const pp = row.placementPoints != null && row.placementPoints !== ''
+                            ? parseInt(row.placementPoints, 10) || 0
+                            : placementPtsFor(row.placement, scoringRules);
                           const liveTotal = (row.teamId || row.teamName)
                             ? calcLiveTotal({
                               placement: row.placement,
@@ -400,7 +413,7 @@ export default function ManualInputModal({
                             })
                             : '—';
                           const editable = step === 3;
-                          const rankLabel = row.placement === 1 ? '🔥 #1' : `#${row.placement}`;
+                          const playersBackup = (row.players || []).map((p) => p.nickname || p).filter(Boolean).join(', ');
 
                           return (
                             <tr
@@ -411,23 +424,55 @@ export default function ManualInputModal({
                                 row.placement === 3 ? 'bg-amber-900/10' : ''
                               }`}
                             >
-                              <td className={`px-2 py-1.5 text-xs font-bold ${
-                                row.placement === 1 ? 'text-gold' : row.placement <= 3 ? 'text-slate-200' : 'text-slate-500'
-                              }`}>{rankLabel}</td>
                               <td className="px-2 py-1.5">
                                 {editable ? (
-                                  <select
-                                    value={row.teamId}
-                                    onChange={(e) => onTeamSelect(idx, e.target.value)}
-                                    className="w-full min-w-[110px] rounded-lg border border-white/10 bg-slate-900 px-2 py-1.5 text-xs text-white"
-                                  >
-                                    <option value="">Select Team</option>
-                                    {teams.map((t) => <option key={t._id} value={t._id}>{t.name}</option>)}
-                                  </select>
+                                  <input
+                                    type="number"
+                                    min="1"
+                                    max="12"
+                                    value={row.placement}
+                                    onChange={(e) => updateField(idx, 'placement', parseInt(e.target.value, 10) || 1)}
+                                    className={inputCls}
+                                  />
                                 ) : (
-                                  <span className="text-xs font-semibold text-white">
-                                    {row.teamName || <span className="text-slate-600">—</span>}
-                                  </span>
+                                  <span className={`text-xs font-bold ${
+                                    row.placement === 1 ? 'text-gold' : row.placement <= 3 ? 'text-slate-200' : 'text-slate-500'
+                                  }`}>#{row.placement}</span>
+                                )}
+                              </td>
+                              <td className="px-2 py-1.5">
+                                {editable ? (
+                                  <div className="space-y-1">
+                                    <input
+                                      type="text"
+                                      value={row.ocrNickname || ''}
+                                      onChange={(e) => updateField(idx, 'ocrNickname', e.target.value)}
+                                      placeholder="Nick OCR"
+                                      className="w-full rounded-lg border border-white/10 bg-slate-900 px-2 py-1 text-xs text-cyan-300"
+                                    />
+                                    <select
+                                      value={row.teamId}
+                                      onChange={(e) => onTeamSelect(idx, e.target.value)}
+                                      className="w-full min-w-[110px] rounded-lg border border-white/10 bg-slate-900 px-2 py-1.5 text-xs text-white"
+                                    >
+                                      <option value="">Select Team</option>
+                                      {teams.map((t) => <option key={t._id} value={t._id}>{t.name}</option>)}
+                                    </select>
+                                    {playersBackup && (
+                                      <p className="truncate text-[9px] text-slate-500" title={playersBackup}>
+                                        Roster: {playersBackup}
+                                      </p>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <div>
+                                    <span className="text-xs font-semibold text-white">
+                                      {row.teamName || <span className="text-slate-600">—</span>}
+                                    </span>
+                                    {row.ocrNickname && (
+                                      <p className="text-[10px] text-cyan-400/80">{row.ocrNickname}</p>
+                                    )}
+                                  </div>
                                 )}
                               </td>
                               <td className="px-2 py-1.5">
@@ -444,7 +489,18 @@ export default function ManualInputModal({
                                   <span className="font-mono text-white">{row.kills === '' ? '—' : row.kills}</span>
                                 )}
                               </td>
-                              <td className="px-2 py-1.5 font-mono text-slate-300">{pp}</td>
+                              <td className="px-2 py-1.5">
+                                {editable ? (
+                                  <input
+                                    type="number"
+                                    value={pp}
+                                    onChange={(e) => updateField(idx, 'placementPoints', e.target.value)}
+                                    className={inputCls}
+                                  />
+                                ) : (
+                                  <span className="font-mono text-slate-300">{pp}</span>
+                                )}
+                              </td>
                               <td className="px-2 py-1.5 text-right font-mono text-sm font-bold text-emerald">{liveTotal}</td>
                             </tr>
                           );

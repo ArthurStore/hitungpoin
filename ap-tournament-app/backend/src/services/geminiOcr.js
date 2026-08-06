@@ -1,21 +1,41 @@
+/**
+ * REST Gemini API — MUST use snake_case field names for multimodal parts.
+ * camelCase (inlineData) is silently ignored → model only sees text → returns [].
+ *
+ * JANGAN kirim thinkingConfig ke gemini-flash-latest (Gemini 3):
+ * thinkingBudget:0 → 400 "Request contains an invalid argument."
+ */
 import { getGeminiApiKey, bumpGeminiUsage, loadSettings } from '../config/settingsStore.js';
 
-const SYSTEM_PROMPT = `Analisis screenshot scoreboard Free Fire ini. Ekstrak data semua tim/player ke dalam format JSON ARRAY murni tanpa teks/markdown tambahan. Format yang wajib dikembalikan:
+const SYSTEM_PROMPT = `Analisis screenshot scoreboard Free Fire ini. Ekstrak data semua TIM ke JSON ARRAY murni tanpa teks/markdown tambahan.
+
+Format wajib:
 [
-  { "rank": 1, "team_name": "EXC", "kills": 2 },
-  { "rank": 2, "team_name": "Dipsy95", "kills": 6 }
+  {
+    "rank": 1,
+    "team_name": "EXC",
+    "kills": 8,
+    "players": [
+      { "nickname": "EXC|Captain", "kills": 3 },
+      { "nickname": "EXC|Player2", "kills": 2 },
+      { "nickname": "EXC|Player3", "kills": 2 },
+      { "nickname": "EXC|Player4", "kills": 1 }
+    ]
+  }
 ]
 
 Aturan:
 - rank: integer 1-12 (placement / booyah = 1)
-- team_name: tag tim atau nickname player sesuai layar (perwakilan yang terbaca)
-- kills: integer jumlah kill (0 jika tidak terbaca)
+- team_name: tag tim / nama tim yang terbaca di scoreboard
+- kills: TOTAL kill TIM (integer, 0 jika tidak terbaca)
+- players: array hingga 4 anggota tim (nickname + kills individu jika terlihat)
+  * Jika hanya 1 nick terbaca, isi 1 item; jika 4 terlihat, isi 4
+  * players dipakai sebagai backup roster / substitusi
 - Maksimal 12 baris, urut naik berdasarkan rank
-- Jangan tambahkan markdown, code fence, atau teks penjelasan di luar JSON array
-- Baca SEMUA baris yang terlihat di screenshot — jangan kembalikan [] jika ada data skor/tim
+- Jangan tambahkan markdown, code fence, atau teks penjelasan
+- Baca SEMUA baris yang terlihat — jangan kembalikan [] jika ada data skor/tim
 - Hanya kembalikan [] jika gambar benar-benar kosong / bukan scoreboard`;
 
-/** Alias non-versioned — hindari model static (2.0 / 2.5 / 1.5 / 1.0) yang sering 404 / deprecated */
 const DEFAULT_MODEL = 'gemini-flash-latest';
 
 const RESULT_SCHEMA = {
@@ -26,6 +46,17 @@ const RESULT_SCHEMA = {
       rank: { type: 'INTEGER' },
       team_name: { type: 'STRING' },
       kills: { type: 'INTEGER' },
+      players: {
+        type: 'ARRAY',
+        items: {
+          type: 'OBJECT',
+          properties: {
+            nickname: { type: 'STRING' },
+            kills: { type: 'INTEGER' },
+          },
+          required: ['nickname'],
+        },
+      },
     },
     required: ['rank', 'team_name', 'kills'],
   },
@@ -73,7 +104,6 @@ function extractJson(text) {
   return null;
 }
 
-/** Last-resort: parse plain lines like "1 EXC 2" / "1. EXC - 2 kills" */
 function parseLooseLines(text) {
   if (!text) return [];
   const results = [];
@@ -86,15 +116,39 @@ function parseLooseLines(text) {
     const rank = parseInt(m[1], 10);
     if (rank < 1 || rank > 12 || seen.has(rank)) return;
     seen.add(rank);
+    const nick = m[2].trim();
     results.push({
       rank,
       placement: rank,
-      teamName: m[2].trim(),
-      nickname: m[2].trim(),
+      teamName: nick,
+      nickname: nick,
       kills: parseInt(m[3], 10) || 0,
+      players: [{ nickname: nick, kills: parseInt(m[3], 10) || 0 }],
     });
   });
   return results.sort((a, b) => a.rank - b.rank);
+}
+
+function normalizePlayers(raw, fallbackNick, teamKills) {
+  const list = Array.isArray(raw) ? raw
+    : Array.isArray(raw?.players) ? raw.players
+      : [];
+
+  const players = list
+    .map((p) => {
+      if (typeof p === 'string') return { nickname: p.trim(), kills: 0 };
+      return {
+        nickname: String(p.nickname || p.name || p.player || '').trim(),
+        kills: parseInt(p.kills ?? p.kill ?? 0, 10) || 0,
+      };
+    })
+    .filter((p) => p.nickname)
+    .slice(0, 4);
+
+  if (!players.length && fallbackNick) {
+    players.push({ nickname: fallbackNick, kills: teamKills || 0 });
+  }
+  return players;
 }
 
 function normalizeResults(parsed) {
@@ -107,13 +161,21 @@ function normalizeResults(parsed) {
             : []);
 
   return list
-    .map((r) => ({
-      rank: parseInt(r.rank ?? r.placement ?? r.place, 10),
-      placement: parseInt(r.rank ?? r.placement ?? r.place, 10),
-      teamName: String(r.team_name || r.teamName || r.nickname || r.name || r.player || '').trim(),
-      nickname: String(r.nickname || r.team_name || r.teamName || r.name || r.player || '').trim(),
-      kills: parseInt(r.kills ?? r.kill ?? r.elim ?? r.eliminations ?? 0, 10) || 0,
-    }))
+    .map((r) => {
+      const teamName = String(r.team_name || r.teamName || r.nickname || r.name || r.player || '').trim();
+      const kills = parseInt(r.kills ?? r.kill ?? r.elim ?? r.eliminations ?? 0, 10) || 0;
+      const rank = parseInt(r.rank ?? r.placement ?? r.place, 10);
+      const players = normalizePlayers(r.players || r.members || r.roster, teamName, kills);
+      const nickname = players[0]?.nickname || teamName;
+      return {
+        rank,
+        placement: rank,
+        teamName,
+        nickname,
+        kills,
+        players,
+      };
+    })
     .filter((r) => r.rank >= 1 && r.rank <= 12 && r.teamName)
     .sort((a, b) => a.rank - b.rank);
 }
@@ -123,7 +185,6 @@ function getModelName() {
   const fromEnv = process.env.GEMINI_MODEL;
   const raw = (fromSettings || fromEnv || DEFAULT_MODEL).trim();
 
-  // Paksa alias latest — model static sering 404 / deprecated
   if (/^gemini-(1\.0|1\.5|2\.0|2\.5)(-|$)/i.test(raw) || raw === 'gemini-pro' || raw === 'gemini-flash') {
     return DEFAULT_MODEL;
   }
@@ -155,14 +216,6 @@ function extractTextFromResponse(data) {
   return { text, finishReason, blockReason: null };
 }
 
-/**
- * REST Gemini API — MUST use snake_case field names for multimodal parts.
- * camelCase (inlineData) is silently ignored → model only sees text → returns [].
- *
- * JANGAN kirim thinkingConfig ke gemini-flash-latest (Gemini 3):
- * thinkingBudget:0 → 400 "Request contains an invalid argument."
- * Curl sederhana tanpa generationConfig ekstra tetap jalan.
- */
 async function callGeminiGenerateContent({ apiKey, model, parts, useSchema = true }) {
   const prevVertex = process.env.GOOGLE_GENAI_USE_VERTEXAI;
   delete process.env.GOOGLE_GENAI_USE_VERTEXAI;
@@ -183,7 +236,6 @@ async function callGeminiGenerateContent({ apiKey, model, parts, useSchema = tru
     return p;
   });
 
-  // Budget besar: model latest bisa pakai thinking internal yang ikut maxOutputTokens
   const generationConfig = {
     temperature: 0.1,
     maxOutputTokens: 8192,
@@ -316,7 +368,10 @@ export async function runGeminiVisionOcr(imageBuffer, mimeType = 'image/png') {
     }
 
     bumpGeminiUsage(latency, true);
-    const textLines = results.map((r) => `${r.rank} ${r.teamName} ${r.kills} Kill`).join('\n');
+    const textLines = results.map((r) => {
+      const roster = (r.players || []).map((p) => p.nickname).join(', ');
+      return `${r.rank} ${r.teamName} ${r.kills} Kill [${roster}]`;
+    }).join('\n');
 
     return {
       success: true,
@@ -355,7 +410,6 @@ export async function testGeminiConnection(apiKeyOverride) {
     delete process.env.GOOGLE_GENAI_USE_VERTEXAI;
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
 
-    // Sama seperti curl yang berhasil — tanpa thinkingConfig
     const res = await fetch(url, {
       method: 'POST',
       headers: {

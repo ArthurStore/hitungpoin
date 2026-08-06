@@ -1,25 +1,9 @@
+@import url("https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;800&family=Russo+One&family=Rajdhani:wght@500;600;700&family=Montserrat:wght@500;600;700;800&family=Poppins:wght@500;600;700&family=Cinzel:wght@600;700&family=Plus+Jakarta+Sans:wght@400;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap");
+
 @import "tailwindcss";
 
-@font-face {
-  font-family: "Plus Jakarta Sans";
-  font-weight: 400 800;
-  font-display: swap;
-  src: url("https://cdn.jsdelivr.net/fontsource/fonts/plus-jakarta-sans@latest/latin-400-normal.woff2") format("woff2");
-}
-
-@font-face {
-  font-family: "Rajdhani";
-  font-weight: 500 700;
-  font-display: swap;
-  src: url("https://cdn.jsdelivr.net/fontsource/fonts/rajdhani@latest/latin-600-normal.woff2") format("woff2");
-}
-
-@font-face {
-  font-family: "JetBrains Mono";
-  font-weight: 400 700;
-  font-display: swap;
-  src: url("https://cdn.jsdelivr.net/fontsource/fonts/jetbrains-mono@latest/latin-400-normal.woff2") format("woff2");
-}
+@custom-variant dark (&:where(.dark, .dark *));
+@custom-variant light (&:where(.light, .light *));
 
 @theme {
   --color-slate-950: #0F172A;
@@ -33,12 +17,33 @@
   --font-mono: "JetBrains Mono", monospace;
 }
 
+:root,
+.dark {
+  --ap-bg: #0F172A;
+  --ap-surface: #1E293B;
+  --ap-text: #e2e8f0;
+  --ap-muted: #94a3b8;
+  --ap-border: rgb(255 255 255 / 0.08);
+  --ap-panel: rgb(30 41 59 / 0.55);
+}
+
+.light {
+  --ap-bg: #f1f5f9;
+  --ap-surface: #ffffff;
+  --ap-text: #0f172a;
+  --ap-muted: #64748b;
+  --ap-border: rgb(15 23 42 / 0.1);
+  --ap-panel: rgb(255 255 255 / 0.85);
+}
+
+html,
 body {
   margin: 0;
   font-family: var(--font-sans);
-  background: #0F172A;
-  color: #e2e8f0;
+  background: var(--ap-bg);
+  color: var(--ap-text);
   min-height: 100dvh;
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 .font-display {
@@ -46,10 +51,14 @@ body {
 }
 
 .glass-panel {
-  background: rgb(30 41 59 / 0.55);
+  background: var(--ap-panel);
   backdrop-filter: blur(16px);
-  border: 1px solid rgb(255 255 255 / 0.08);
+  border: 1px solid var(--ap-border);
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.06);
+}
+
+.light .glass-panel {
+  box-shadow: 0 1px 3px rgb(15 23 42 / 0.08);
 }
 
 .terminal-log {
@@ -59,10 +68,37 @@ body {
 }
 
 @media (prefers-reduced-transparency: reduce) {
-  .glass-panel { backdrop-filter: none; background: #1e293b; }
+  .glass-panel { backdrop-filter: none; background: var(--ap-surface); }
 }
 
 @keyframes slideUp {
   from { opacity: 0; transform: translateY(12px); }
   to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes overlayScan {
+  0% { transform: translateY(-100%); opacity: 0.15; }
+  100% { transform: translateY(100%); opacity: 0.05; }
+}
+
+@keyframes overlayGlow {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 0.7; }
+}
+
+@keyframes rowReveal {
+  from { opacity: 0; transform: translateX(-24px); filter: blur(4px); }
+  to { opacity: 1; transform: translateX(0); filter: blur(0); }
+}
+
+.overlay-scanline {
+  animation: overlayScan 4s linear infinite;
+}
+
+.overlay-glow {
+  animation: overlayGlow 3s ease-in-out infinite;
+}
+
+.overlay-row-enter {
+  animation: rowReveal 0.55s ease-out both;
 }

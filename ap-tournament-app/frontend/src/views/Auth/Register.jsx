@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import Button from '../../components/Button';
+import ThemeToggle from '../../components/ThemeToggle';
 
 export default function Register() {
   const { register } = useAuth();
@@ -25,9 +26,12 @@ export default function Register() {
   };
 
   return (
-    <div className="flex min-h-[100dvh] items-center justify-center bg-slate-950 px-4">
+    <div className="relative flex min-h-[100dvh] items-center justify-center bg-[var(--ap-bg)] px-4">
+      <div className="absolute right-4 top-4">
+        <ThemeToggle />
+      </div>
       <div className="glass-panel w-full max-w-md rounded-2xl p-8">
-        <h1 className="mb-6 text-2xl font-bold text-white">Register Organizer</h1>
+        <h1 className="mb-6 text-2xl font-bold text-white light:text-slate-900">Register Organizer</h1>
         <form onSubmit={handleSubmit} className="space-y-4">
           {['name', 'email', 'password'].map((field) => (
             <div key={field}>
@@ -37,12 +41,12 @@ export default function Register() {
                 value={form[field]}
                 onChange={(e) => setForm({ ...form, [field]: e.target.value })}
                 required
-                className="w-full rounded-xl border border-white/10 bg-slate-800/50 px-4 py-3 text-white focus:outline-none"
+                className="w-full rounded-xl border border-white/10 bg-slate-800/50 px-4 py-3 text-white focus:outline-none light:border-slate-300 light:bg-white light:text-slate-900"
               />
             </div>
           ))}
           {error && <p className="text-sm text-crimson">{error}</p>}
-          <Button type="submit" variant="success" className="w-full" loading={loading}>Register</Button>
+          <Button type="submit" className="w-full" loading={loading}>Register</Button>
         </form>
         <p className="mt-6 text-center text-sm text-slate-500">
           Sudah punya akun? <Link to="/login" className="text-emerald hover:underline">Login</Link>

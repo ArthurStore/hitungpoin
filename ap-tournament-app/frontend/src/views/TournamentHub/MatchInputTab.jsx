@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useOutletContext } from 'react-router-dom';
-import { UploadSimple, Scan, PencilSimple } from '@phosphor-icons/react';
+import { UploadSimple, Scan, PencilSimple, ClockCounterClockwise } from '@phosphor-icons/react';
 import Button from '../../components/Button';
 import ProgressBar from '../../components/ProgressBar';
 import TerminalLogs, { createLogEntry } from '../../components/TerminalLogs';
@@ -11,9 +11,22 @@ import {
   scanMultiPass, matchTeamsToRoster, terminateWorker,
 } from '../../utils/ocrScanner';
 import { calcMatchPoints, getScoringRules, getDefaultPlacementPoints } from '../../utils/pointsCalc';
-import { api } from '../../utils/api';
+import { api, resolveAssetUrl } from '../../utils/api';
 
 const MAX_SCREENSHOTS = 3;
+
+async function blobUrlToDataUrl(url) {
+  if (!url) return '';
+  if (url.startsWith('data:')) return url;
+  const res = await fetch(url);
+  const blob = await res.blob();
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
 
 function openManualFallback(setToast, setManualOpen, setStartStep, addLog, reason) {
   setToast({ message: reason || 'OCR gagal — beralih ke Manual Input', type: 'error' });
@@ -52,7 +65,7 @@ export default function MatchInputTab() {
   const handleFiles = (incoming) => {
     const accepted = Array.from(incoming).slice(0, MAX_SCREENSHOTS);
     setPreviews((prev) => {
-      prev.forEach((u) => URL.revokeObjectURL(u));
+      prev.forEach((u) => { if (u.startsWith('blob:')) URL.revokeObjectURL(u); });
       return accepted.map((f) => URL.createObjectURL(f));
     });
     setFiles(accepted);
@@ -61,6 +74,42 @@ export default function MatchInputTab() {
     setLogs([]);
     setProgress(0);
     setManualOpen(false);
+  };
+
+  const openSavedMatch = (mn) => {
+    const match = matches.find((m) => m.matchNumber === mn);
+    if (!match || match.status !== 'verified') {
+      setToast({ message: 'Match ini belum punya hasil tersimpan', type: 'error' });
+      return;
+    }
+    setMatchNumber(mn);
+    setInputMode(match.inputMode || inputMode);
+    const rows = (match.results || []).map((r, i) => ({
+      id: i,
+      placement: r.placement,
+      teamId: r.teamId || '',
+      teamName: r.teamName,
+      ocrNickname: r.ocrNickname || r.nickname || r.teamName,
+      nickname: r.ocrNickname || r.nickname || r.teamName,
+      kills: r.kills ?? 0,
+      totalScore: r.totalScore ?? r.kills ?? 0,
+      placementPoints: r.placementPoints,
+      players: r.players || [],
+      matchedTeamName: r.teamName,
+    }));
+    setVerifiedResults(rows);
+    setNicknames(rows.map((r) => ({
+      nickname: r.ocrNickname || r.teamName,
+      kills: r.kills,
+      hits: 1,
+      placements: [r.placement],
+    })));
+    const shots = (match.screenshots || []).map((s) => resolveAssetUrl(s) || s);
+    setPreviews(shots);
+    setFiles([]);
+    setStartStep(3);
+    setManualOpen(true);
+    setToast({ message: `Edit Match ${mn} — hasil OCR/input sebelumnya dimuat`, type: 'success' });
   };
 
   const runOCR = async () => {
@@ -102,6 +151,7 @@ export default function MatchInputTab() {
         ...r,
         id: i,
         ocrNickname: r.nickname || r.teamName,
+        players: r.players || [],
         placementPoints: getDefaultPlacementPoints(r.placement, scoringRules)
           + (r.placement === 1 ? (scoringRules.booyahBonus || 0) : 0),
       }));
@@ -136,35 +186,52 @@ export default function MatchInputTab() {
           totalScore: parseInt(r.totalScore, 10) || 0,
           placementPoints: r.placementPoints != null ? parseInt(r.placementPoints, 10) : undefined,
           totalPoints: r.totalPoints,
+          ocrNickname: r.ocrNickname || r.nickname || '',
+          players: r.players || [],
         }));
 
-      const scored = calcMatchPoints(payload, 'cr_biasa', scoringRules).map((row, i) => {
+      const scored = calcMatchPoints(payload, inputMode, scoringRules).map((row, i) => {
         const src = payload[i];
+        if (inputMode === 'cr_league') {
+          return {
+            ...row,
+            ocrNickname: src.ocrNickname,
+            players: src.players,
+          };
+        }
         const killPt = scoringRules.killPoint ?? 1;
-        const pp = src.placementPoints != null
-          ? src.placementPoints
-          : row.placementPoints;
+        const pp = src.placementPoints != null ? src.placementPoints : row.placementPoints;
         const kp = (src.kills || 0) * killPt;
         return {
           ...row,
           placementPoints: pp,
           killPoints: kp,
           totalPoints: src.totalPoints != null ? src.totalPoints : (pp + kp),
+          ocrNickname: src.ocrNickname,
+          players: src.players,
         };
       });
+
+      let screenshots = [];
+      try {
+        screenshots = (await Promise.all(previews.map((p) => blobUrlToDataUrl(p)))).filter(Boolean).slice(0, 3);
+      } catch {
+        screenshots = [];
+      }
 
       await api.submitMatchResults(tournament._id, {
         matchNumber,
         results: scored,
-        inputMode: 'cr_biasa',
+        inputMode,
         ocrProcessed: verifiedResults.length > 0,
+        screenshots,
       });
       if (!verifiedResults.length) {
         try { await api.recordManualScan(); } catch { /* ignore */ }
       }
       await refresh();
       setFiles([]);
-      setPreviews((prev) => { prev.forEach((u) => URL.revokeObjectURL(u)); return []; });
+      setPreviews((prev) => { prev.forEach((u) => { if (u.startsWith('blob:')) URL.revokeObjectURL(u); }); return []; });
       setVerifiedResults([]);
       setNicknames([]);
       setManualOpen(false);
@@ -186,8 +253,11 @@ export default function MatchInputTab() {
         totalScore: r.totalScore ?? '',
         placementPoints: r.placementPoints,
         nickname: r.nickname || r.teamName,
+        players: r.players || [],
       }))
     : undefined;
+
+  const currentMatch = matches.find((m) => m.matchNumber === matchNumber);
 
   return (
     <div className="space-y-6">
@@ -207,7 +277,7 @@ export default function MatchInputTab() {
       />
 
       <div className="glass-panel rounded-2xl p-6">
-        <h2 className="mb-4 font-bold text-white">Input Match Results</h2>
+        <h2 className="mb-4 font-bold text-white light:text-slate-900">Input Match Results</h2>
 
         <div className="mb-4">
           <label className="mb-2 block text-sm text-slate-300">Input Mode</label>
@@ -227,14 +297,26 @@ export default function MatchInputTab() {
 
         <div>
           <label className="mb-2 block text-sm text-slate-300">Match Number</label>
-          <select value={matchNumber} onChange={(e) => setMatchNumber(parseInt(e.target.value, 10))}
-            className="w-full rounded-xl border border-white/10 bg-slate-800 px-4 py-3 text-white">
-            {(matches.length ? matches : [{ matchNumber: 1, map: 'Bermuda' }]).map((m) => (
-              <option key={m.matchNumber} value={m.matchNumber}>
-                Match {m.matchNumber} - {m.map} {m.status === 'verified' ? '(Done)' : ''}
-              </option>
-            ))}
-          </select>
+          <div className="flex flex-wrap gap-2">
+            <select value={matchNumber} onChange={(e) => setMatchNumber(parseInt(e.target.value, 10))}
+              className="min-w-[200px] flex-1 rounded-xl border border-white/10 bg-slate-800 px-4 py-3 text-white">
+              {(matches.length ? matches : [{ matchNumber: 1, map: 'Bermuda' }]).map((m) => (
+                <option key={m.matchNumber} value={m.matchNumber}>
+                  Match {m.matchNumber} - {m.map} {m.status === 'verified' ? '(Done)' : ''}
+                </option>
+              ))}
+            </select>
+            {currentMatch?.status === 'verified' && (
+              <Button variant="secondary" onClick={() => openSavedMatch(matchNumber)}>
+                <ClockCounterClockwise size={16} /> Edit Hasil Match {matchNumber}
+              </Button>
+            )}
+          </div>
+          {currentMatch?.status === 'verified' && (
+            <p className="mt-2 text-xs text-slate-500">
+              Match sudah tersimpan. Klik &quot;Edit Hasil&quot; untuk buka ulang hasil OCR + screenshot tanpa scan ulang.
+            </p>
+          )}
         </div>
       </div>
 
