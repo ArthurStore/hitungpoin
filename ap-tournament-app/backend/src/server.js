@@ -8,6 +8,7 @@ import { config } from './config/env.js';
 import { connectDatabase } from './config/database.js';
 import { UPLOADS_DIR } from './config/upload.js';
 import { initSocket } from './socket.js';
+import { hydrateGeminiKeysFromEnv } from './config/settingsStore.js';
 import authRoutes from './routes/authRoutes.js';
 import tournamentRoutes from './routes/tournamentRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
@@ -16,6 +17,7 @@ import ocrRoutes from './routes/ocrRoutes.js';
 import uploadRoutes from './routes/uploadRoutes.js';
 
 dotenv.config();
+hydrateGeminiKeysFromEnv();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();

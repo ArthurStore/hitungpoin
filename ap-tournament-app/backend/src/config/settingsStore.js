@@ -86,7 +86,79 @@ export function saveSettings(partial) {
   })();
   const next = normalizeKeys({ ...current, ...partial });
   fs.writeFileSync(SETTINGS_PATH, JSON.stringify(next, null, 2));
+
+  // Persist keys to .env so PM2 restart keeps them
+  if (partial.geminiApiKeys != null || partial.geminiApiKey != null) {
+    persistGeminiKeysToEnv(next.geminiApiKeys);
+  }
+
+  // Keep process.env in sync for current process
+  const primary = (next.geminiApiKeys || []).find(Boolean) || next.geminiApiKey || '';
+  if (primary) process.env.GEMINI_API_KEY = primary;
+
   return next;
+}
+
+const ENV_PATH = path.join(__dirname, '../../.env');
+
+function persistGeminiKeysToEnv(keys = []) {
+  try {
+    const primary = (keys || []).map((k) => String(k || '').trim()).find(Boolean) || '';
+    const k1 = String(keys[0] || '').trim();
+    const k2 = String(keys[1] || '').trim();
+    const k3 = String(keys[2] || '').trim();
+
+    let content = '';
+    if (fs.existsSync(ENV_PATH)) {
+      content = fs.readFileSync(ENV_PATH, 'utf8');
+    }
+
+    const upsert = (src, key, value) => {
+      const re = new RegExp(`^${key}=.*$`, 'm');
+      const line = `${key}=${value}`;
+      if (re.test(src)) return src.replace(re, line);
+      return `${src.trimEnd()}\n${line}\n`;
+    };
+
+    let next = content || '';
+    next = upsert(next, 'GEMINI_API_KEY', primary);
+    next = upsert(next, 'GEMINI_API_KEY_1', k1);
+    next = upsert(next, 'GEMINI_API_KEY_2', k2);
+    next = upsert(next, 'GEMINI_API_KEY_3', k3);
+    fs.writeFileSync(ENV_PATH, next.endsWith('\n') ? next : `${next}\n`);
+  } catch (err) {
+    console.warn('[settings] gagal tulis .env:', err.message);
+  }
+}
+
+/** Bootstrap keys from .env slots on server start */
+export function hydrateGeminiKeysFromEnv() {
+  const envKeys = [
+    process.env.GEMINI_API_KEY_1,
+    process.env.GEMINI_API_KEY_2,
+    process.env.GEMINI_API_KEY_3,
+  ].map((k) => (k || '').trim());
+  const primary = (process.env.GEMINI_API_KEY || '').trim();
+  if (!primary && !envKeys.some(Boolean)) {
+    // still load settings.json
+    return loadSettings();
+  }
+
+  const s = loadSettings();
+  const existing = s.geminiApiKeys || ['', '', ''];
+  const merged = [
+    existing[0] || envKeys[0] || primary || '',
+    existing[1] || envKeys[1] || '',
+    existing[2] || envKeys[2] || '',
+  ];
+  // If settings empty but env has keys, persist into settings.json
+  if (!existing.some(Boolean) && merged.some(Boolean)) {
+    return saveSettings({ geminiApiKeys: merged, geminiApiKey: merged.find(Boolean) || '' });
+  }
+  if (primary && !process.env.GEMINI_API_KEY) {
+    process.env.GEMINI_API_KEY = merged.find(Boolean) || primary;
+  }
+  return s;
 }
 
 /** All non-empty API keys with slot index (0-based) */

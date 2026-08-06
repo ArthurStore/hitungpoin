@@ -22,7 +22,6 @@ export default function ObsOverlay() {
   const [enterFrom, setEnterFrom] = useState('left');
   const tournamentIdRef = useRef(null);
 
-  // Lock page scroll for OBS browser source
   useEffect(() => {
     document.documentElement.classList.add('obs-overlay-page');
     document.body.classList.add('obs-overlay-page');
@@ -92,12 +91,9 @@ export default function ObsOverlay() {
   const totalMatches = tournament?.totalMatches || 6;
   const matchNumbers = Array.from({ length: totalMatches }, (_, i) => i + 1);
   const matchCols = matchColumnCount(totalMatches, mode);
-  const teamCount = Math.max(standings.length, 1);
-
-  // Scale typography by how many rows we need to fit
-  const dense = teamCount >= 12;
-  const veryDense = teamCount >= 14;
-  const gridCols = `32px minmax(0,1.5fr) repeat(${matchCols}, minmax(0,1fr)) 48px`;
+  const n = Math.max(standings.length, 1);
+  // Always dense enough for 15 rows on 1080p
+  const gridCols = `28px minmax(0,1.4fr) repeat(${matchCols}, minmax(0,1fr)) 44px`;
 
   if (!tournament) {
     return (
@@ -108,31 +104,18 @@ export default function ObsOverlay() {
   }
 
   return (
-    <div className="obs-overlay-root flex h-screen w-screen max-h-screen flex-col overflow-hidden bg-transparent p-3 text-white sm:p-4">
-      <div className="pointer-events-none absolute inset-0 overflow-hidden">
-        <div
-          className="overlay-glow absolute -left-16 top-4 h-40 w-40 rounded-full blur-3xl"
-          style={{ background: 'radial-gradient(circle, #22d3ee33, transparent 70%)' }}
-        />
-        <div
-          className="overlay-glow absolute -right-8 bottom-6 h-44 w-44 rounded-full blur-3xl"
-          style={{ background: 'radial-gradient(circle, #e879f933, transparent 70%)', animationDelay: '1s' }}
-        />
-      </div>
-
-      <div className="relative z-10 flex min-h-0 flex-1 flex-col overflow-hidden">
-        <header className="mb-1.5 flex shrink-0 items-center justify-between border-b border-cyan-400/30 pb-1.5">
+    <div className="obs-overlay-root relative flex h-screen w-screen max-h-screen flex-col justify-between overflow-hidden bg-transparent p-2 text-white">
+      <div className="relative z-10 flex h-full min-h-0 w-full flex-col overflow-hidden">
+        <header className="flex w-full shrink-0 items-center justify-between border-b border-cyan-400/30 pb-1">
           <div className="min-w-0">
-            <h1 className={`font-display font-black uppercase tracking-[0.18em] text-white drop-shadow-[0_0_12px_#22d3ee] ${
-              dense ? 'text-xl' : 'text-2xl sm:text-3xl'
-            }`}>
+            <h1 className="font-display text-lg font-black uppercase leading-none tracking-[0.16em] text-white drop-shadow-[0_0_10px_#22d3ee] sm:text-xl md:text-2xl">
               LIVE SCORE
             </h1>
-            <p className="truncate text-[10px] uppercase tracking-[0.25em] text-fuchsia-300/80 sm:text-xs">
+            <p className="mt-0.5 truncate text-[9px] uppercase tracking-[0.22em] text-fuchsia-300/80 sm:text-[10px]">
               {tournament.name}
             </p>
           </div>
-          <span className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[10px] font-bold ${
+          <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-bold ${
             connected ? 'bg-emerald/20 text-emerald' : 'bg-white/10 text-white/50'
           }`}>
             <span className={`h-1.5 w-1.5 rounded-full ${connected ? 'bg-emerald animate-pulse' : 'bg-white/40'}`} />
@@ -141,46 +124,43 @@ export default function ObsOverlay() {
         </header>
 
         <div
-          className="mb-1 grid shrink-0 items-end gap-0.5 px-1"
+          className="mt-1 grid w-full shrink-0 items-end gap-0 px-0.5"
           style={{ gridTemplateColumns: gridCols }}
         >
-          <span className="pb-0.5 text-[9px] font-bold text-cyan-200/60">#</span>
-          <span className="pb-0.5 text-[9px] font-bold uppercase text-cyan-200/60">Team</span>
+          <span className="pb-0.5 text-[8px] font-bold text-cyan-200/60">#</span>
+          <span className="pb-0.5 text-[8px] font-bold uppercase text-cyan-200/60">Team</span>
           <MatchTreeHeaders matchNumbers={matchNumbers} mode={mode} compact />
-          <span className="pb-0.5 text-right text-[9px] font-bold text-cyan-200/60">TOTAL</span>
+          <span className="pb-0.5 text-right text-[8px] font-bold text-cyan-200/60">TOTAL</span>
         </div>
 
-        {/* Rows autofit: flex-1 distributes remaining height across all 15 teams */}
-        <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-hidden">
+        {/* Equal-height rows fill remaining viewport — fits 15 on 1080p */}
+        <div
+          className="mt-0.5 grid min-h-0 w-full flex-1 gap-0.5 overflow-hidden"
+          style={{ gridTemplateRows: `repeat(${n}, minmax(0, 1fr))` }}
+        >
           {standings.map((team, idx) => {
             const animName = enterFrom === 'left' ? 'overlaySlideLeft' : 'overlaySlideRight';
             return (
               <div
                 key={`${team.teamId || team.teamName}-${tick}`}
-                className="grid min-h-0 flex-1 items-center gap-0.5 rounded border border-cyan-400/20 bg-black/50 px-1.5 backdrop-blur-sm"
+                className="grid h-full min-h-0 w-full items-center gap-0 rounded border border-cyan-400/20 bg-black/55 px-1"
                 style={{
                   gridTemplateColumns: gridCols,
-                  paddingTop: veryDense ? 2 : dense ? 3 : 4,
-                  paddingBottom: veryDense ? 2 : dense ? 3 : 4,
-                  animation: `${animName} 0.45s ease-out both`,
-                  animationDelay: `${Math.min(idx, 10) * 0.04}s`,
-                  boxShadow: team.rank <= 3 ? '0 0 10px rgba(34,211,238,0.18)' : 'none',
+                  animation: `${animName} 0.4s ease-out both`,
+                  animationDelay: `${Math.min(idx, 8) * 0.03}s`,
+                  boxShadow: team.rank <= 3 ? '0 0 8px rgba(34,211,238,0.16)' : 'none',
                 }}
               >
-                <span className={`font-display font-black leading-none ${
+                <span className={`font-display text-xs font-black leading-none sm:text-sm ${
                   team.rank <= 3 ? 'text-amber-300' : 'text-white/85'
-                } ${dense ? 'text-sm' : 'text-base'}`}>
+                }`}>
                   {team.rank}
                 </span>
-                <p className={`truncate font-display font-bold uppercase leading-tight tracking-wide text-cyan-100 ${
-                  dense ? 'text-sm' : 'text-base'
-                }`}>
+                <p className="truncate font-display text-xs font-bold uppercase leading-none tracking-wide text-cyan-100 sm:text-sm">
                   {team.teamName}
                 </p>
                 <MatchScoreCells team={team} matchNumbers={matchNumbers} mode={mode} compact />
-                <span className={`text-right font-mono font-black leading-none text-amber-300 drop-shadow-[0_0_6px_#f59e0b] ${
-                  dense ? 'text-sm' : 'text-base'
-                }`}>
+                <span className="text-right font-mono text-xs font-black leading-none text-amber-300 sm:text-sm">
                   {team.totalPoints}
                 </span>
               </div>

@@ -6,7 +6,8 @@ export async function scanImage(req, res) {
     if (!req.file) return res.status(400).json({ error: 'No image uploaded' });
 
     const mime = req.file.mimetype || 'image/png';
-    const result = await runGeminiVisionOcr(req.file.buffer, mime);
+    const mode = (req.body?.mode || req.query?.mode || 'cr_biasa').toString();
+    const result = await runGeminiVisionOcr(req.file.buffer, mime, mode);
 
     if (!result.success) {
       return res.status(422).json(result);

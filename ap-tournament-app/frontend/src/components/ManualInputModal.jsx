@@ -66,10 +66,13 @@ function nickSimilar(a, b) {
 
 /**
  * Score OCR group vs master team.
- * Match by roster nicknames OR team name (fuzzy) — not requiring identical names.
+ * CR League: team_name fuzzy alone is enough.
+ * CR Biasa: roster nick overlap preferred.
  */
-export function scoreTeamMatch(ocrNicknames, team) {
-  const ocrNorms = [...new Set((ocrNicknames || []).map(norm).filter(Boolean))];
+export function scoreTeamMatch(ocrNicknames, team, ocrTeamName = '') {
+  const ocrNorms = [...new Set(
+    [...(ocrNicknames || []), ocrTeamName].map(norm).filter(Boolean)
+  )];
   if (!ocrNorms.length || !team) return 0;
 
   const teamNorm = norm(team.name);
@@ -79,12 +82,15 @@ export function scoreTeamMatch(ocrNicknames, team) {
 
   let best = 0;
 
-  // Nickname OCR ↔ nama tim
+  // Nama tim OCR ↔ nama master
   ocrNorms.forEach((n) => {
     best = Math.max(best, nickSimilar(n, teamNorm));
   });
+  if (teamNorm && ocrTeamName) {
+    best = Math.max(best, nickSimilar(norm(ocrTeamName), teamNorm));
+  }
 
-  // Nickname OCR ↔ roster (termasuk cadangan)
+  // Nickname OCR ↔ roster
   let rosterHits = 0;
   let rosterBest = 0;
   ocrNorms.forEach((n) => {
@@ -103,18 +109,17 @@ export function scoreTeamMatch(ocrNicknames, team) {
   return best;
 }
 
-function findBestTeam(ocrNicknames, teamsList, usedTeamIds = new Set()) {
+function findBestTeam(ocrNicknames, teamsList, usedTeamIds = new Set(), ocrTeamName = '') {
   let best = null;
   let bestScore = 0;
   (teamsList || []).forEach((t) => {
     if (usedTeamIds.has(String(t._id))) return;
-    const score = scoreTeamMatch(ocrNicknames, t);
+    const score = scoreTeamMatch(ocrNicknames, t, ocrTeamName);
     if (score > bestScore) {
       bestScore = score;
       best = t;
     }
   });
-  // Auto-select hanya jika cukup yakin
   if (bestScore >= 70) return { team: best, score: bestScore };
   return { team: null, score: bestScore };
 }
@@ -307,7 +312,7 @@ export default function ManualInputModal({
         used.add(String(g.teamId));
         return g;
       }
-      const { team } = findBestTeam(g.nicknames, teamsList, used);
+      const { team } = findBestTeam(g.nicknames, teamsList, used, g.teamName || g.nicknames?.[0]);
       if (!team) return g;
       used.add(String(team._id));
       return { ...g, teamId: team._id, teamName: team.name };
@@ -371,6 +376,34 @@ export default function ManualInputModal({
     return hit ? hit.placement : null;
   };
 
+  const applyGroupMapToRows = useCallback((groups = groupMap, baseRows = rows) => {
+    const next = baseRows.map((r) => ({ ...r }));
+    groups.forEach((g) => {
+      if (!g.teamId && !g.teamName) return;
+      const team = localTeams.find((t) => String(t._id) === String(g.teamId));
+      const place = g.placement;
+      if (place && place >= 1 && place <= 12) {
+        const idx = place - 1;
+        const nicks = g.nicknames || [];
+        next[idx] = {
+          ...next[idx],
+          teamId: g.teamId || '',
+          teamName: team?.name || g.teamName || '',
+          ocrNickname: nicks.join(' · ') || g.teamName || next[idx].ocrNickname,
+          nicknames: nicks.length ? nicks : (g.teamName ? [g.teamName] : next[idx].nicknames),
+          players: g.players?.length
+            ? g.players
+            : (nicks.length ? nicks.map((n) => ({ nickname: n })) : next[idx].players),
+          kills: next[idx].kills !== '' && next[idx].kills != null
+            ? next[idx].kills
+            : (g.kills ?? ''),
+        };
+      }
+    });
+    setRows(next);
+    return next;
+  }, [groupMap, rows, localTeams]);
+
   const assignGroupTeam = (groupIdx, teamId, teamName) => {
     if (teamId) {
       const dupRank = findDuplicateTeam(teamId, groupIdx, 'group');
@@ -382,35 +415,15 @@ export default function ManualInputModal({
         return false;
       }
     }
-    setGroupMap((prev) => prev.map((row, j) =>
-      j === groupIdx ? { ...row, teamId: teamId || '', teamName: teamName || '' } : row
-    ));
-    return true;
-  };
-
-  const applyGroupMapToRows = () => {
-    setRows((prev) => {
-      const next = prev.map((r) => ({ ...r }));
-      groupMap.forEach((g) => {
-        if (!g.teamId && !g.teamName) return;
-        const team = localTeams.find((t) => t._id === g.teamId);
-        const place = g.placement;
-        if (place && place >= 1 && place <= 12) {
-          const idx = place - 1;
-          const nicks = g.nicknames || [];
-          next[idx] = {
-            ...next[idx],
-            teamId: g.teamId,
-            teamName: team?.name || g.teamName,
-            ocrNickname: nicks.join(' · '),
-            nicknames: nicks,
-            players: g.players || nicks.map((n) => ({ nickname: n })),
-            kills: next[idx].kills !== '' ? next[idx].kills : (g.kills || ''),
-          };
-        }
-      });
+    setGroupMap((prev) => {
+      const next = prev.map((row, j) =>
+        j === groupIdx ? { ...row, teamId: teamId || '', teamName: teamName || '' } : row
+      );
+      // Keep rows in sync immediately (prevents Apply losing selection)
+      applyGroupMapToRows(next, rows);
       return next;
     });
+    return true;
   };
 
   const updateKills = (idx, value) => {
@@ -422,7 +435,7 @@ export default function ManualInputModal({
   };
 
   const onTeamSelect = (idx, teamId) => {
-    const team = localTeams.find((t) => t._id === teamId);
+    const team = localTeams.find((t) => String(t._id) === String(teamId));
     if (teamId) {
       const dupRank = findDuplicateTeam(teamId, idx, 'rows');
       if (dupRank != null) {
@@ -436,6 +449,15 @@ export default function ManualInputModal({
     setRows((prev) => prev.map((r, i) =>
       i === idx ? { ...r, teamId, teamName: team?.name || '' } : r
     ));
+    // Mirror into groupMap so Step 1 ↔ 3 stay in sync
+    const placement = rows[idx]?.placement;
+    if (placement) {
+      setGroupMap((prev) => prev.map((g) =>
+        g.placement === placement
+          ? { ...g, teamId: teamId || '', teamName: team?.name || '' }
+          : g
+      ));
+    }
   };
 
   const createTeamFromGroup = async (groupIdx) => {
@@ -502,7 +524,6 @@ export default function ManualInputModal({
 
   const goNext = () => {
     if (step === 1) {
-      // Warn duplicates before leaving step 1
       const seen = new Map();
       for (const g of groupMap) {
         if (!g.teamId) continue;
@@ -513,19 +534,42 @@ export default function ManualInputModal({
         }
         seen.set(id, g.placement);
       }
-      applyGroupMapToRows();
+      // Sync selections BEFORE leaving Step 1 (returns fresh rows)
+      applyGroupMapToRows(groupMap, rows);
       setStep(2);
       showToast('');
     } else if (step === 2) {
+      applyGroupMapToRows(groupMap, rows);
       setStep(3);
     }
   };
 
+  const goToStep = (target) => {
+    if (target < 1 || target > 3) return;
+    if (target > step && step === 1) {
+      applyGroupMapToRows(groupMap, rows);
+    }
+    setStep(target);
+  };
+
   const handleSubmit = () => {
-    // Stay on step 3 — validate, never force back to step 1
-    const linked = rows.filter((r) => r.teamId || r.teamName);
+    // Re-sync from groupMap so selections never get lost on Apply
+    const synced = applyGroupMapToRows(groupMap, rows);
+    const linked = synced.filter((r) => r.teamId || r.teamName);
+
     if (!linked.length) {
       showToast('Gagal Submit: belum ada rank yang ditautkan ke Tim!', true);
+      return;
+    }
+
+    const unlinkedWithScore = synced.filter((r) =>
+      (r.kills !== '' && r.kills != null) && !r.teamId && !r.teamName
+    );
+    if (unlinkedWithScore.length) {
+      showToast(
+        `Gagal Submit: Rank ${unlinkedWithScore.map((r) => `#${r.placement}`).join(', ')} belum memilih Tim!`,
+        true
+      );
       return;
     }
 
@@ -540,14 +584,6 @@ export default function ManualInputModal({
     if (dups.length) {
       showToast(`Gagal Submit: Tim duplikat di Rank ${dups.join(', ')}`, true);
       return;
-    }
-
-    const withScore = linked.filter((r) => r.kills === '' || r.kills == null);
-    if (withScore.length && isLeague) {
-      showToast(
-        `Peringatan: Rank ${withScore.map((r) => `#${r.placement}`).join(', ')} belum punya SCORE — tetap dikirim sebagai 0`,
-        true
-      );
     }
 
     const payload = linked.map((r) => {
@@ -571,7 +607,7 @@ export default function ManualInputModal({
         placementPoints,
         totalPoints: total,
         totalScore: kills,
-        ocrNickname: nicks.join(' · ') || r.ocrNickname || '',
+        ocrNickname: nicks.join(' · ') || r.ocrNickname || r.teamName || '',
         players: r.players?.length ? r.players : nicks.map((n) => ({ nickname: n })),
         nicknames: nicks,
       };
@@ -607,7 +643,11 @@ export default function ManualInputModal({
                 <button
                   key={s.id}
                   type="button"
-                  onClick={() => { if (s.id <= step || s.id === 3) setStep(s.id); }}
+                  onClick={() => {
+                    if (s.id <= step || s.id === step + 1 || (s.id === 3 && step >= 1)) {
+                      goToStep(s.id);
+                    }
+                  }}
                   className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold ${
                     step === s.id ? 'bg-emerald text-white' :
                     step > s.id ? 'bg-emerald/20 text-emerald' : 'bg-slate-800 text-slate-500'
@@ -646,8 +686,17 @@ export default function ManualInputModal({
               {step === 1 && (
                 <div className="space-y-3">
                   <p className="text-xs text-slate-400">
-                    Setiap baris = <strong className="text-white">1 tim (hingga 4 nickname)</strong>.
-                    1 tim hanya boleh 1 rank. Auto-match fuzzy dari roster/nama.
+                    {isLeague ? (
+                      <>
+                        Mode <strong className="text-white">CR League</strong>: OCR membaca <strong className="text-white">Nama Tim + Score</strong>.
+                        Tim otomatis dicocokkan / dibuat — preview & Apply saja.
+                      </>
+                    ) : (
+                      <>
+                        Setiap baris = <strong className="text-white">1 tim (hingga 4 nickname)</strong>.
+                        1 tim hanya boleh 1 rank. Auto-match fuzzy dari roster/nama.
+                      </>
+                    )}
                   </p>
                   {groupMap.length === 0 ? (
                     <p className="rounded-xl bg-slate-800/50 p-4 text-sm text-slate-500">

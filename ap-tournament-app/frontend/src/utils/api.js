@@ -109,9 +109,10 @@ export const api = {
     return uploadRequest('/upload/certificate', fd, 45000);
   },
 
-  scanOcr: (blob, timeoutMs = 90000) => {
+  scanOcr: (blob, timeoutMs = 90000, mode = 'cr_biasa') => {
     const fd = new FormData();
     fd.append('image', blob, 'scoreboard.png');
+    fd.append('mode', mode || 'cr_biasa');
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     const headers = {};

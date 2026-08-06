@@ -8,14 +8,14 @@ async function dataUrlToBlob(dataUrl) {
 }
 
 /** Primary OCR: Gemini Vision via backend */
-export async function scanWithLogs(dataUrl, onLog, onProgress) {
-  onLog?.('Sending screenshot to Gemini Vision (gemini-flash-latest)...', 5);
+export async function scanWithLogs(dataUrl, onLog, onProgress, mode = 'cr_biasa') {
+  onLog?.(`Sending screenshot to Gemini Vision (${mode})...`, 5);
   onProgress?.(10);
 
   try {
     const blob = await dataUrlToBlob(dataUrl);
     onProgress?.(25);
-    const result = await api.scanOcr(blob, SERVER_OCR_TIMEOUT_MS);
+    const result = await api.scanOcr(blob, SERVER_OCR_TIMEOUT_MS, mode);
 
     if (result.success && (result.results?.length || result.text?.trim())) {
       onLog?.(`Gemini OK${result.latencyMs ? ` (${result.latencyMs}ms)` : ''} — ${result.results?.length || 0} rows`, 100);
@@ -101,7 +101,7 @@ export async function scanMultiPass(dataUrls, mode, onLog, onProgress) {
     const base = (i / total) * 100;
     const result = await scanWithLogs(dataUrls[i], onLog, (pct) => {
       onProgress?.(Math.round(base + pct / total));
-    });
+    }, mode);
 
     if (!result.success) {
       errors.push(result.error || `Pass ${i + 1} failed`);

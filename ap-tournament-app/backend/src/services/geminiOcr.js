@@ -8,7 +8,7 @@ import {
   saveSettings,
 } from '../config/settingsStore.js';
 
-const SYSTEM_PROMPT = `You are a Free Fire scoreboard OCR engine.
+const SYSTEM_PROMPT_BIAS = `You are a Free Fire scoreboard OCR engine.
 Extract EVERY team row visible in the screenshot into a pure JSON ARRAY. No markdown.
 
 REQUIRED format (example):
@@ -40,6 +40,32 @@ STRICT RULES:
 7. Max 12 teams, sorted by rank ascending.
 8. Return ONLY the JSON array. Never return [] if any scoreboard rows are visible.
 9. Do NOT invent players that are not on screen; but DO extract every visible nick + kill number.`;
+
+const SYSTEM_PROMPT_LEAGUE = `You are a Free Fire CR LEAGUE / RANKLIST OCR engine.
+The screenshot shows Rank | Team Name | Score (NO individual player nicknames).
+
+Extract EVERY visible row into a pure JSON ARRAY. No markdown.
+
+REQUIRED format:
+[
+  {
+    "rank": 1,
+    "team_name": "WERGOL",
+    "nickname": "WERGOL",
+    "kills": 57,
+    "players": [{ "nickname": "WERGOL", "kills": 57 }]
+  }
+]
+
+STRICT RULES:
+1. rank = placement 1-12 from the Rank column.
+2. team_name = EXACT team name string as shown (e.g. WERGOL, ADMIN, ARCN). REQUIRED, never empty.
+3. nickname = SAME as team_name (CR League has no player nicks).
+4. kills = the TOTAL SCORE number shown for that team (NOT elim kills — it is the score column). Integer >= 0.
+5. players = single entry mirroring team_name + score.
+6. Max 12 teams, sorted by rank ascending.
+7. Return ONLY the JSON array. Read team names carefully — do not invent names.
+8. Never return [] if ranklist rows are visible.`;
 
 const DEFAULT_MODEL = 'gemini-flash-latest';
 
@@ -324,7 +350,7 @@ async function generateOcrContent(apiKey, model, parts) {
   }
 }
 
-export async function runGeminiVisionOcr(imageBuffer, mimeType = 'image/png') {
+export async function runGeminiVisionOcr(imageBuffer, mimeType = 'image/png', mode = 'cr_biasa') {
   const keyOrder = getGeminiKeyRotationOrder();
   if (!keyOrder.length) {
     return { success: false, error: 'GEMINI_API_KEY not configured (isi Key 1–3 di Admin)', engine: 'gemini', text: '', results: [] };
@@ -336,8 +362,9 @@ export async function runGeminiVisionOcr(imageBuffer, mimeType = 'image/png') {
     ? imageBuffer.toString('base64')
     : Buffer.from(imageBuffer).toString('base64');
 
+  const prompt = mode === 'cr_league' ? SYSTEM_PROMPT_LEAGUE : SYSTEM_PROMPT_BIAS;
   const parts = [
-    { text: SYSTEM_PROMPT },
+    { text: prompt },
     { inline_data: { mime_type: mimeType || 'image/png', data: base64 } },
   ];
 
@@ -358,12 +385,24 @@ export async function runGeminiVisionOcr(imageBuffer, mimeType = 'image/png') {
       let results = normalizeResults(extractJson(text));
       if (!results.length) results = parseLooseLines(text);
 
+      // CR League: force nickname = team_name when missing
+      if (mode === 'cr_league') {
+        results = results.map((r) => {
+          const name = r.teamName || r.nickname || '';
+          return {
+            ...r,
+            teamName: name,
+            nickname: name,
+            players: (r.players?.length ? r.players : [{ nickname: name, kills: r.kills || 0 }]),
+          };
+        });
+      }
+
       if (!results.length) {
         lastError = (text || '').slice(0, 240)
           ? `No results parsed. Raw: ${(text || '').slice(0, 240)}`
           : `No results parsed (finishReason=${finishReason || 'unknown'})`;
         bumpGeminiUsage(latency, false, lastError.slice(0, 240), slot + 1);
-        // Don't rotate key for empty parse — content issue, not key limit
         return {
           success: false,
           error: lastError,

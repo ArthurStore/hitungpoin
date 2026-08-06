@@ -176,7 +176,7 @@ export default function MatchInputTab() {
         return;
       }
 
-      const matched = matchTeamsToRoster(result.entries, teams).map((r, i) => ({
+      let matched = matchTeamsToRoster(result.entries, teams).map((r, i) => ({
         ...r,
         id: i,
         ocrNickname: (r.players || []).map((p) => p.nickname || p).filter(Boolean).join(' · ')
@@ -187,12 +187,63 @@ export default function MatchInputTab() {
         totalScore: inputMode === 'cr_league' ? (r.kills ?? r.totalScore ?? 0) : (r.totalScore ?? r.kills ?? 0),
       }));
 
+      // CR League: OCR = Nama Tim + Score → auto-match / auto-create di master
+      if (inputMode === 'cr_league') {
+        addLog('CR League: auto-match / buat tim dari nama OCR…');
+        const liveTeams = [...teams];
+        const usedIds = new Set();
+        for (let i = 0; i < matched.length; i += 1) {
+          const row = matched[i];
+          const ocrName = String(row.teamName || row.nickname || '').trim();
+          if (!ocrName) continue;
+
+          const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+          const ocrN = norm(ocrName);
+          let team = liveTeams.find((t) => {
+            if (usedIds.has(String(t._id))) return false;
+            const tn = norm(t.name);
+            return tn === ocrN || (tn.length >= 3 && ocrN.length >= 3 && (tn.includes(ocrN) || ocrN.includes(tn)));
+          });
+
+          if (!team) {
+            try {
+              team = await api.upsertTeam(tournament._id, {
+                name: ocrName,
+                players: [{ nickname: ocrName }],
+                merge: true,
+              });
+              liveTeams.push(team);
+              addLog(`+ Tim baru: ${team.name}`);
+            } catch (err) {
+              addLog(`Gagal buat tim ${ocrName}: ${err.message}`);
+            }
+          }
+
+          if (team) {
+            usedIds.add(String(team._id));
+            matched[i] = {
+              ...row,
+              teamId: team._id,
+              matchedTeamName: team.name,
+              teamName: team.name,
+              ocrNickname: ocrName,
+            };
+          }
+        }
+        try { await refresh(); } catch { /* soft */ }
+      }
+
       setVerifiedResults(matched);
       setNicknames(result.nicknames || []);
-      setTeamGroups((result.teamGroups || []).map((g, i) => ({
-        ...g,
-        teamId: matched[i]?.teamId || '',
-        teamName: matched[i]?.matchedTeamName || '',
+      setTeamGroups((result.teamGroups || matched).map((g, i) => ({
+        placement: g.placement || matched[i]?.placement,
+        kills: g.kills ?? matched[i]?.kills ?? 0,
+        nicknames: g.nicknames
+          || (g.players || matched[i]?.players || []).map((p) => p.nickname || p).filter(Boolean)
+          || [matched[i]?.teamName || matched[i]?.nickname].filter(Boolean),
+        players: g.players || matched[i]?.players || [],
+        teamId: matched[i]?.teamId || g.teamId || '',
+        teamName: matched[i]?.matchedTeamName || matched[i]?.teamName || g.teamName || '',
       })));
       setStartStep(1);
       setManualOpen(true);
