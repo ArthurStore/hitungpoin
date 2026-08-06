@@ -2,7 +2,7 @@ import { isMemoryStore } from '../config/database.js';
 import { memoryStore } from '../config/memoryStore.js';
 import { clearMediaStorage } from '../config/upload.js';
 import {
-  loadSettings, saveSettings, getGeminiApiKey,
+  loadSettings, saveSettings, getGeminiApiKey, getGeminiApiKeys,
 } from '../config/settingsStore.js';
 import { testGeminiConnection, runGeminiVisionOcr } from '../services/geminiOcr.js';
 import User from '../models/User.js';
@@ -66,14 +66,20 @@ export async function getAdminMetrics(req, res) {
       };
     }
 
-    const hasKey = !!getGeminiApiKey();
+    const keys = getGeminiApiKeys();
+    const hasKey = keys.length > 0 || !!getGeminiApiKey();
+    const allKeys = settings.geminiApiKeys || ['', '', ''];
     res.json({
       ...base,
       scansAi: settings.scansAi || 0,
       scansManual: settings.scansManual || 0,
       gemini: {
         configured: hasKey,
-        maskedKey: maskKey(settings.geminiApiKey || process.env.GEMINI_API_KEY || ''),
+        maskedKey: maskKey(allKeys.find(Boolean) || process.env.GEMINI_API_KEY || ''),
+        /** Plaintext keys for admin editing (PIN-gated endpoint) */
+        keys: [allKeys[0] || '', allKeys[1] || '', allKeys[2] || ''],
+        activeSlots: keys.map((k) => k.slot + 1),
+        lastKeySlot: settings.geminiLastKeySlot || null,
         model: settings.geminiModel || 'gemini-flash-latest',
         dailyUsage: settings.geminiDailyUsage || 0,
         dailyDate: settings.geminiDailyDate || '',
@@ -124,22 +130,42 @@ export async function resetMediaStorage(req, res) {
 
 export async function updateGeminiKey(req, res) {
   try {
-    const { apiKey } = req.body || {};
-    if (typeof apiKey !== 'string') {
-      return res.status(400).json({ error: 'apiKey string required' });
+    const body = req.body || {};
+    let keys = ['', '', ''];
+
+    if (Array.isArray(body.keys)) {
+      keys = [0, 1, 2].map((i) => String(body.keys[i] || '').trim());
+    } else if (typeof body.apiKey === 'string') {
+      // legacy single-key
+      keys[0] = body.apiKey.trim();
+      const current = loadSettings().geminiApiKeys || ['', '', ''];
+      keys[1] = current[1] || '';
+      keys[2] = current[2] || '';
+    } else if (body.key1 != null || body.key2 != null || body.key3 != null) {
+      keys = [
+        String(body.key1 || '').trim(),
+        String(body.key2 || '').trim(),
+        String(body.key3 || '').trim(),
+      ];
+    } else {
+      return res.status(400).json({ error: 'keys array or apiKey required' });
     }
-    const trimmed = apiKey.trim();
+
     const settings = saveSettings({
-      geminiApiKey: trimmed,
+      geminiApiKeys: keys,
+      geminiApiKey: keys.find(Boolean) || '',
       geminiModel: 'gemini-flash-latest',
-      geminiLastStatus: trimmed ? 'updated' : 'missing',
+      geminiLastStatus: keys.some(Boolean) ? 'updated' : 'missing',
       geminiLastError: '',
     });
+
     res.json({
       ok: true,
-      configured: !!trimmed,
-      maskedKey: maskKey(trimmed),
+      configured: keys.some(Boolean),
+      keys: settings.geminiApiKeys,
+      maskedKey: maskKey(settings.geminiApiKeys.find(Boolean) || ''),
       model: settings.geminiModel,
+      activeSlots: getGeminiApiKeys().map((k) => k.slot + 1),
     });
   } catch (err) {
     res.status(500).json({ error: err.message });

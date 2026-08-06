@@ -1,16 +1,17 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useOutletContext } from 'react-router-dom';
-import { Certificate, Download, UploadSimple } from '@phosphor-icons/react';
+import { Certificate, Download, UploadSimple, Trash } from '@phosphor-icons/react';
 import Button from '../../components/Button';
 import Toast from '../../components/Toast';
 import { api, resolveAssetUrl } from '../../utils/api';
 import { downloadDataUrl } from '../../utils/exportUtils';
 
-const DEFAULT_PLACEHOLDERS = {
-  teamName: { x: 50, y: 45, label: 'Nama Juara / Team' },
-  rank: { x: 50, y: 35, label: 'Peringkat' },
-  tournamentName: { x: 50, y: 58, label: 'Nama Turnamen' },
-  date: { x: 50, y: 68, label: 'Tanggal' },
+const ALL_PLACEHOLDERS = {
+  rank: { x: 50, y: 32, label: 'Peringkat / Rank', enabled: true },
+  teamName: { x: 50, y: 44, label: 'Nama Tim / Peserta', enabled: true },
+  finalScore: { x: 50, y: 54, label: 'Score Poin Akhir', enabled: true },
+  tournamentName: { x: 50, y: 64, label: 'Nama Turnamen', enabled: true },
+  date: { x: 50, y: 74, label: 'Tanggal', enabled: true },
 };
 
 const RANK_LABELS = { 1: 'JUARA 1', 2: 'JUARA 2', 3: 'JUARA 3' };
@@ -29,16 +30,16 @@ const BODY_FONTS = [
 
 const COLOR_PRESETS = {
   'Gold Premium': {
-    rank: '#F59E0B', team: '#FFF7ED', tournament: '#FCD34D', date: '#A8A29E',
+    rank: '#F59E0B', team: '#FFF7ED', score: '#FDE68A', tournament: '#FCD34D', date: '#A8A29E',
   },
   'Cyberpunk Neon': {
-    rank: '#22D3EE', team: '#E879F9', tournament: '#A3E635', date: '#94A3B8',
+    rank: '#22D3EE', team: '#E879F9', score: '#A3E635', tournament: '#67E8F9', date: '#94A3B8',
   },
   'Minimalist Dark': {
-    rank: '#F8FAFC', team: '#F1F5F9', tournament: '#CBD5E1', date: '#64748B',
+    rank: '#F8FAFC', team: '#F1F5F9', score: '#E2E8F0', tournament: '#CBD5E1', date: '#64748B',
   },
   'Minimalist Light': {
-    rank: '#0F172A', team: '#1E293B', tournament: '#334155', date: '#64748B',
+    rank: '#0F172A', team: '#1E293B', score: '#334155', tournament: '#475569', date: '#64748B',
   },
 };
 
@@ -62,12 +63,28 @@ function loadImage(src) {
 
 async function ensureFonts(fonts) {
   if (!document.fonts?.load) return;
-  await Promise.all(
-    fonts.map((f) => document.fonts.load(`700 48px "${f}"`).catch(() => null))
-  );
+  await Promise.all(fonts.map((f) => document.fonts.load(`700 48px "${f}"`).catch(() => null)));
 }
 
-async function renderCertificate({ templateUrl, placeholders, style, teamName, rank, tournamentName, date }) {
+function mergePlaceholders(saved = {}) {
+  const merged = {};
+  Object.keys(ALL_PLACEHOLDERS).forEach((key) => {
+    const base = ALL_PLACEHOLDERS[key];
+    const s = saved[key] || {};
+    merged[key] = {
+      ...base,
+      x: s.x ?? base.x,
+      y: s.y ?? base.y,
+      enabled: s.enabled !== undefined ? !!s.enabled : (s.removed ? false : base.enabled),
+      label: base.label,
+    };
+  });
+  return merged;
+}
+
+async function renderCertificate({
+  templateUrl, placeholders, style, teamName, rank, tournamentName, date, finalScore,
+}) {
   await ensureFonts([style.displayFont, style.bodyFont]);
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d');
@@ -91,7 +108,7 @@ async function renderCertificate({ templateUrl, placeholders, style, teamName, r
   }
 
   const drawText = (text, pos, size, color, fontFamily, weight = '700') => {
-    if (!pos) return;
+    if (!pos?.enabled) return;
     const x = (pos.x / 100) * canvas.width;
     const y = (pos.y / 100) * canvas.height;
     ctx.fillStyle = color;
@@ -107,6 +124,7 @@ async function renderCertificate({ templateUrl, placeholders, style, teamName, r
   const c = style.colors;
   drawText(RANK_LABELS[rank] || `JUARA ${rank}`, placeholders.rank, Math.round(canvas.width * 0.038), c.rank, style.displayFont, style.rankWeight);
   drawText(teamName, placeholders.teamName, Math.round(canvas.width * 0.048), c.team, style.bodyFont, style.teamWeight);
+  drawText(`${finalScore ?? 0} PTS`, placeholders.finalScore, Math.round(canvas.width * 0.032), c.score || c.rank, style.displayFont, '700');
   drawText(tournamentName, placeholders.tournamentName, Math.round(canvas.width * 0.024), c.tournament, style.bodyFont, '600');
   drawText(date, placeholders.date, Math.round(canvas.width * 0.02), c.date, style.bodyFont, '500');
 
@@ -122,10 +140,7 @@ export default function CertificateTab() {
   const [uploading, setUploading] = useState(false);
   const [toast, setToast] = useState({ message: '', type: 'info' });
   const [templateUrl, setTemplateUrl] = useState(tournament?.certificateTemplate || '');
-  const [placeholders, setPlaceholders] = useState({
-    ...DEFAULT_PLACEHOLDERS,
-    ...(tournament?.certificatePlaceholders || {}),
-  });
+  const [placeholders, setPlaceholders] = useState(mergePlaceholders(tournament?.certificatePlaceholders));
   const [style, setStyle] = useState({
     ...DEFAULT_STYLE,
     ...(tournament?.certificateStyle || {}),
@@ -140,7 +155,7 @@ export default function CertificateTab() {
 
   useEffect(() => {
     setTemplateUrl(tournament?.certificateTemplate || '');
-    setPlaceholders({ ...DEFAULT_PLACEHOLDERS, ...(tournament?.certificatePlaceholders || {}) });
+    setPlaceholders(mergePlaceholders(tournament?.certificatePlaceholders));
     setStyle({
       ...DEFAULT_STYLE,
       ...(tournament?.certificateStyle || {}),
@@ -171,6 +186,7 @@ export default function CertificateTab() {
   };
 
   const onPointerDown = (key) => (e) => {
+    if (!placeholders[key]?.enabled) return;
     e.preventDefault();
     e.stopPropagation();
     setDragging(key);
@@ -198,6 +214,20 @@ export default function CertificateTab() {
     };
   }, [dragging, onPointerMove]);
 
+  const removePlaceholder = (key) => {
+    setPlaceholders((prev) => ({
+      ...prev,
+      [key]: { ...prev[key], enabled: false },
+    }));
+  };
+
+  const restorePlaceholder = (key) => {
+    setPlaceholders((prev) => ({
+      ...prev,
+      [key]: { ...prev[key], enabled: true },
+    }));
+  };
+
   const applyPreset = (name) => {
     setStyle((s) => ({ ...s, colors: { ...COLOR_PRESETS[name] } }));
   };
@@ -205,22 +235,17 @@ export default function CertificateTab() {
   const saveLayout = async () => {
     setSaving(true);
     try {
+      const phPayload = {};
+      Object.entries(placeholders).forEach(([key, pos]) => {
+        phPayload[key] = { x: pos.x, y: pos.y, enabled: !!pos.enabled };
+      });
       await api.updateTournament(tournament._id, {
         certificateTemplate: templateUrl?.startsWith('data:') ? tournament.certificateTemplate : templateUrl,
-        certificatePlaceholders: {
-          teamName: { x: placeholders.teamName.x, y: placeholders.teamName.y },
-          rank: { x: placeholders.rank.x, y: placeholders.rank.y },
-          tournamentName: { x: placeholders.tournamentName.x, y: placeholders.tournamentName.y },
-          date: { x: placeholders.date.x, y: placeholders.date.y },
-        },
+        certificatePlaceholders: phPayload,
         certificateStyle: style,
       });
-      if (templateUrl?.startsWith('data:')) {
-        setToast({ message: 'Layout & style disimpan (template lokal).', type: 'success' });
-      } else {
-        await refresh?.();
-        setToast({ message: 'Template, font & warna disimpan!', type: 'success' });
-      }
+      await refresh?.();
+      setToast({ message: 'Template, warna & placeholder disimpan!', type: 'success' });
     } catch (err) {
       setToast({ message: err.message, type: 'error' });
     } finally {
@@ -243,8 +268,9 @@ export default function CertificateTab() {
           rank: i + 1,
           tournamentName: tournament.name,
           date,
+          finalScore: top[i].totalPoints ?? 0,
         });
-        certs.push({ rank: i + 1, teamName: top[i].teamName, dataUrl });
+        certs.push({ rank: i + 1, teamName: top[i].teamName, dataUrl, finalScore: top[i].totalPoints });
       }
       setCertificates(certs);
       setToast({ message: `${certs.length} sertifikat digenerate`, type: 'success' });
@@ -261,9 +287,9 @@ export default function CertificateTab() {
       {label}
       <input
         type="color"
-        value={style.colors[key]}
+        value={style.colors[key] || '#ffffff'}
         onChange={(e) => setStyle((s) => ({ ...s, colors: { ...s.colors, [key]: e.target.value } }))}
-        className="mt-1 h-9 w-full cursor-pointer rounded-lg border border-white/10 bg-slate-900"
+        className="mt-1 h-10 w-full cursor-pointer rounded-lg border border-white/10 bg-slate-900"
       />
     </label>
   );
@@ -275,7 +301,7 @@ export default function CertificateTab() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="font-bold text-white light:text-slate-900">Certificate Template Builder</h2>
-          <p className="text-xs text-slate-500">Font eSports, color palette, drag placeholder, export PNG</p>
+          <p className="text-xs text-slate-500">Color picker per elemen · hapus placeholder · Score Poin Akhir</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button variant="secondary" onClick={saveLayout} loading={saving}>Save Layout</Button>
@@ -303,7 +329,7 @@ export default function CertificateTab() {
             ) : (
               <div className="flex h-full items-center justify-center text-sm text-slate-600">Belum ada template</div>
             )}
-            {Object.entries(placeholders).map(([key, pos]) => (
+            {Object.entries(placeholders).filter(([, pos]) => pos.enabled).map(([key, pos]) => (
               <button
                 key={key}
                 type="button"
@@ -311,7 +337,7 @@ export default function CertificateTab() {
                 className={`absolute z-10 -translate-x-1/2 -translate-y-1/2 cursor-grab rounded-lg border px-2 py-1 text-[10px] font-bold shadow-lg active:cursor-grabbing ${
                   dragging === key ? 'border-emerald bg-emerald text-white' : 'border-white/30 bg-black/70 text-white'
                 }`}
-                style={{ left: `${pos.x}%`, top: `${pos.y}%`, fontFamily: key === 'rank' ? style.displayFont : style.bodyFont }}
+                style={{ left: `${pos.x}%`, top: `${pos.y}%` }}
               >
                 [{pos.label || key}]
               </button>
@@ -345,7 +371,7 @@ export default function CertificateTab() {
               </label>
             </div>
 
-            <p className="pt-2 font-semibold text-white">Color Palette</p>
+            <p className="pt-2 font-semibold text-white">Color Picker (per elemen)</p>
             <div className="flex flex-wrap gap-2">
               {Object.keys(COLOR_PRESETS).map((name) => (
                 <button
@@ -358,12 +384,39 @@ export default function CertificateTab() {
                 </button>
               ))}
             </div>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              {colorField('rank', 'Rank')}
-              {colorField('team', 'Team Name')}
-              {colorField('tournament', 'Tournament')}
-              {colorField('date', 'Date')}
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+              {colorField('rank', 'Peringkat / Rank')}
+              {colorField('team', 'Nama Tim')}
+              {colorField('score', 'Score Poin Akhir')}
+              {colorField('tournament', 'Turnamen')}
+              {colorField('date', 'Tanggal')}
             </div>
+
+            <p className="pt-2 font-semibold text-white">Placeholders</p>
+            <ul className="space-y-2">
+              {Object.entries(placeholders).map(([key, pos]) => (
+                <li key={key} className="flex items-center justify-between gap-2 rounded-lg bg-slate-800/50 px-3 py-2 text-xs">
+                  <span className={pos.enabled ? 'text-white' : 'text-slate-500 line-through'}>{pos.label}</span>
+                  {pos.enabled ? (
+                    <button
+                      type="button"
+                      onClick={() => removePlaceholder(key)}
+                      className="inline-flex items-center gap-1 rounded-lg bg-crimson/15 px-2 py-1 text-crimson hover:bg-crimson/25"
+                    >
+                      <Trash size={12} /> Remove
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => restorePlaceholder(key)}
+                      className="rounded-lg bg-emerald/15 px-2 py-1 text-emerald hover:bg-emerald/25"
+                    >
+                      Restore
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ul>
           </div>
 
           {certificates.length > 0 && (
@@ -371,7 +424,10 @@ export default function CertificateTab() {
               {certificates.map((cert) => (
                 <div key={cert.rank} className="glass-panel overflow-hidden rounded-2xl">
                   <div className="border-b border-white/5 px-4 py-2">
-                    <p className="text-sm font-bold text-gold">Juara {cert.rank} — {cert.teamName}</p>
+                    <p className="text-sm font-bold text-gold">
+                      Juara {cert.rank} — {cert.teamName}
+                      {cert.finalScore != null && <span className="ml-2 text-emerald">{cert.finalScore} PTS</span>}
+                    </p>
                   </div>
                   <img src={cert.dataUrl} alt={`Juara ${cert.rank}`} className="w-full p-2" />
                   <div className="p-3">

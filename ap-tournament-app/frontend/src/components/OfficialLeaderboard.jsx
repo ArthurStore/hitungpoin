@@ -21,38 +21,11 @@ const POSTER_W = 540;
 const POSTER_H = 960;
 const MAX_TEAMS = 15;
 
-function MatchCell({ team, matchNo, mode }) {
-  const bd = team.matchBreakdown?.[matchNo];
-  const total = bd?.totalPoints ?? team.matchScores?.[matchNo];
-
-  if (total == null && !bd) {
-    return <span className="text-center font-mono text-[9px] text-slate-500">-</span>;
-  }
-
-  if (mode === 'cr_league') {
-    return (
-      <span className="text-center font-mono text-[10px] font-bold text-cyan-300">
-        {total ?? '-'}
-      </span>
-    );
-  }
-
-  // CR Biasa: Placement Pts | Kill Pts
-  const pp = bd?.placementPoints ?? 0;
-  const kp = bd?.killPoints ?? 0;
-  return (
-    <span className="flex flex-col items-center leading-tight">
-      <span className="font-mono text-[8px] font-semibold text-emerald">{pp}</span>
-      <span className="font-mono text-[7px] text-slate-400">{kp}k</span>
-    </span>
-  );
-}
-
 function TeamLogo({ logo, name }) {
   const url = resolveAssetUrl(logo);
   if (!url) {
     return (
-      <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-sm bg-white/5 text-[8px] font-bold text-white/40">
+      <div className="flex h-7 w-7 shrink-0 items-center justify-center text-[10px] font-bold text-white/40">
         {(name || '?').slice(0, 1)}
       </div>
     );
@@ -61,8 +34,8 @@ function TeamLogo({ logo, name }) {
     <img
       src={url}
       alt=""
-      className="h-6 w-6 shrink-0 object-contain"
-      style={{ background: 'transparent', border: 'none', boxShadow: 'none' }}
+      className="h-7 w-7 shrink-0 object-contain"
+      style={{ background: 'transparent', border: 'none', boxShadow: 'none', outline: 'none' }}
       crossOrigin="anonymous"
     />
   );
@@ -82,7 +55,10 @@ export default function OfficialLeaderboard({
   const logoUrl = resolveAssetUrl(tournament?.logo);
   const mode = tournament?.inputMode || 'cr_biasa';
   const rows = standings.slice(0, MAX_TEAMS);
-  const rowH = Math.floor(720 / Math.max(rows.length || 15, 15));
+  const rowH = Math.floor(700 / Math.max(rows.length || 15, 15));
+
+  // Each match = Pts + Kills side by side
+  const matchCols = totalMatches * 2;
 
   return (
     <div className="mx-auto overflow-hidden rounded-2xl shadow-2xl ring-1 ring-white/10" style={{ width: POSTER_W }}>
@@ -102,55 +78,66 @@ export default function OfficialLeaderboard({
 
         <div className="relative z-10 px-4 pb-2 pt-5">
           <div className="mb-3 flex items-center justify-between gap-2">
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden">
+            <div className="flex h-14 w-14 shrink-0 items-center justify-center">
               {logoUrl ? (
-                <img src={logoUrl} alt="Organizer" className="h-full w-full object-contain" crossOrigin="anonymous" style={{ background: 'transparent' }} />
+                <img
+                  src={logoUrl}
+                  alt="Organizer"
+                  className="h-full w-full object-contain"
+                  crossOrigin="anonymous"
+                  style={{ background: 'transparent', border: 'none' }}
+                />
               ) : (
-                <span className="text-[8px] font-bold uppercase text-white/40">LOGO</span>
+                <span className="text-[9px] font-bold uppercase text-white/40">LOGO</span>
               )}
             </div>
 
             <div className="min-w-0 flex-1 text-center">
               <h1
-                className="font-display text-xl font-black uppercase leading-tight tracking-wide text-white"
+                className="font-display text-2xl font-black uppercase leading-tight tracking-wide text-white"
                 style={{ textShadow: '0 2px 12px rgba(0,0,0,0.8)' }}
               >
                 {subtitle}
               </h1>
-              <p className="mt-0.5 truncate text-[11px] font-semibold uppercase tracking-[0.2em] text-amber-400/90">
+              <p className="mt-0.5 truncate text-xs font-semibold uppercase tracking-[0.2em] text-amber-400/90">
                 {tournament?.name}
               </p>
             </div>
 
-            <div className="flex h-12 w-16 shrink-0 items-center justify-center">
+            {/* Official Free Fire asset (uploaded PNG) — no SVG */}
+            <div className="flex h-14 w-20 shrink-0 items-center justify-center">
               <img
-                src="/free-fire-logo.svg"
+                src="/free-fire-logo.png"
                 alt="Free Fire"
                 className="h-full w-full object-contain"
                 crossOrigin="anonymous"
-                style={{ background: 'transparent' }}
-                onError={(e) => { e.currentTarget.src = '/free-fire-logo.png'; }}
+                style={{ background: 'transparent', border: 'none' }}
               />
             </div>
           </div>
 
           <div className="h-px bg-gradient-to-r from-transparent via-amber-500/50 to-transparent" />
-          <p className="mt-1 text-center text-[8px] uppercase tracking-widest text-slate-500">
-            {mode === 'cr_league' ? 'CR League · Total Score / Match' : 'CR Biasa · Place Pts | Kill Pts'}
+          <p className="mt-1 text-center text-[9px] uppercase tracking-widest text-slate-500">
+            {mode === 'cr_league' ? 'CR League · Pts | Kills' : 'CR Biasa · Pts | Kills per Match'}
           </p>
         </div>
 
-        <div className="relative z-10 flex-1 overflow-hidden px-2.5 pb-2">
+        <div className="relative z-10 flex-1 overflow-hidden px-2 pb-2">
           <div
-            className="mb-1 grid items-center gap-0.5 px-0.5 text-[9px] font-bold uppercase tracking-wider text-slate-400"
+            className="mb-1 grid items-end gap-x-0.5 px-0.5 text-[8px] font-bold uppercase tracking-wide text-slate-400"
             style={{
-              gridTemplateColumns: `20px 28px minmax(0, 1fr) repeat(${totalMatches}, minmax(0, 1fr)) 34px`,
+              gridTemplateColumns: `22px 30px minmax(0, 1.2fr) repeat(${matchCols}, minmax(0, 1fr)) 40px`,
             }}
           >
             <span>#</span>
             <span />
             <span className="truncate">Team</span>
-            {matchNumbers.map((n) => <span key={n} className="text-center">M{n}</span>)}
+            {matchNumbers.map((n) => (
+              <span key={n} className="col-span-2 grid grid-cols-2 text-center">
+                <span>M{n}P</span>
+                <span>M{n}K</span>
+              </span>
+            ))}
             <span className="text-right">PTS</span>
           </div>
 
@@ -166,37 +153,52 @@ export default function OfficialLeaderboard({
               return (
                 <div
                   key={team.teamId || team.teamName}
-                  className={`grid items-center gap-0.5 rounded-sm bg-gradient-to-r px-0.5 ${rs.row}`}
+                  className={`grid items-center gap-x-0.5 rounded-sm bg-gradient-to-r px-0.5 ${rs.row}`}
                   style={{
-                    gridTemplateColumns: `20px 28px minmax(0, 1fr) repeat(${totalMatches}, minmax(0, 1fr)) 34px`,
-                    minHeight: Math.max(28, Math.min(44, rowH)),
-                    height: Math.max(28, Math.min(44, rowH)),
+                    gridTemplateColumns: `22px 30px minmax(0, 1.2fr) repeat(${matchCols}, minmax(0, 1fr)) 40px`,
+                    minHeight: Math.max(32, Math.min(46, rowH)),
+                    height: Math.max(32, Math.min(46, rowH)),
                   }}
                 >
-                  <div className={`flex h-5 w-5 items-center justify-center rounded text-[10px] font-black ${rs.badge}`}>
+                  <div className={`flex h-6 w-6 items-center justify-center rounded text-[11px] font-black ${rs.badge}`}>
                     {team.rank}
                   </div>
                   <TeamLogo logo={team.logo} name={team.teamName} />
-                  <p className="truncate text-[11px] font-bold uppercase leading-tight tracking-wide text-white" title={team.teamName}>
-                    {team.rank === 1 && <Fire size={10} weight="fill" className="mr-0.5 inline text-orange-300" />}
+                  <p className="truncate text-[12px] font-bold uppercase leading-tight tracking-wide text-white" title={team.teamName}>
+                    {team.rank === 1 && <Fire size={11} weight="fill" className="mr-0.5 inline text-orange-300" />}
                     {team.teamName}
                   </p>
-                  {matchNumbers.map((n) => (
-                    editable ? (
+                  {matchNumbers.map((n) => {
+                    const bd = team.matchBreakdown?.[n];
+                    const pts = mode === 'cr_league'
+                      ? (bd?.totalPoints ?? team.matchScores?.[n])
+                      : (bd?.totalPoints ?? team.matchScores?.[n]);
+                    const kills = bd?.kills ?? '—';
+                    const cell = (
+                      <>
+                        <span className="text-center font-mono text-[11px] font-bold text-emerald-300">
+                          {pts == null ? '-' : pts}
+                        </span>
+                        <span className="text-center font-mono text-[10px] font-semibold text-cyan-200/90">
+                          {kills === '—' || kills == null ? '-' : kills}
+                        </span>
+                      </>
+                    );
+                    return editable ? (
                       <button
                         key={n}
                         type="button"
                         onClick={() => onEditMatchScore?.(team, n)}
-                        className="rounded hover:bg-white/10"
+                        className="col-span-2 grid grid-cols-2 rounded hover:bg-white/10"
                         title={`Edit M${n}`}
                       >
-                        <MatchCell team={team} matchNo={n} mode={mode} />
+                        {cell}
                       </button>
                     ) : (
-                      <MatchCell key={n} team={team} matchNo={n} mode={mode} />
-                    )
-                  ))}
-                  <span className="text-right font-mono text-[12px] font-black text-amber-400">
+                      <span key={n} className="col-span-2 grid grid-cols-2">{cell}</span>
+                    );
+                  })}
+                  <span className="text-right font-mono text-[14px] font-black text-amber-400">
                     {team.totalPoints}
                   </span>
                 </div>
@@ -206,7 +208,7 @@ export default function OfficialLeaderboard({
         </div>
 
         <div className="relative z-10 border-t border-white/5 px-4 py-2 text-center">
-          <p className="font-display text-[10px] font-bold uppercase tracking-[0.35em] text-emerald/70">
+          <p className="font-display text-[11px] font-bold uppercase tracking-[0.35em] text-emerald/70">
             AP · Arthur Points
           </p>
         </div>

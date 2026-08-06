@@ -145,9 +145,16 @@ export const api = {
   resetMediaStorage: (pin) => request('/admin/reset-media', {
     method: 'POST', headers: adminHeaders(pin), body: JSON.stringify({}),
   }),
-  updateGeminiKey: (pin, apiKey) => request('/admin/gemini-key', {
-    method: 'POST', headers: adminHeaders(pin), body: JSON.stringify({ apiKey }),
-  }),
+  updateGeminiKey: (pin, apiKeyOrKeys) => {
+    const body = Array.isArray(apiKeyOrKeys)
+      ? { keys: apiKeyOrKeys }
+      : (typeof apiKeyOrKeys === 'object' && apiKeyOrKeys != null
+        ? apiKeyOrKeys
+        : { apiKey: apiKeyOrKeys || '' });
+    return request('/admin/gemini-key', {
+      method: 'POST', headers: adminHeaders(pin), body: JSON.stringify(body),
+    });
+  },
   testGemini: (pin, apiKey) => request('/admin/gemini-test', {
     method: 'POST', headers: adminHeaders(pin), body: JSON.stringify({ apiKey: apiKey || undefined }),
   }),

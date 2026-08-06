@@ -14,13 +14,15 @@ import Toast from '../../components/Toast';
 function AnalyserPreview({ result }) {
   if (!result) return null;
 
+  const rawRows = result.results || [];
   const rows = calcMatchPoints(
-    (result.results || []).map((r) => ({
+    rawRows.map((r) => ({
       placement: r.placement || r.rank,
       rank: r.rank || r.placement,
       teamName: r.teamName || r.team_name || '',
       nickname: r.nickname || r.teamName || r.team_name || '',
       kills: r.kills ?? 0,
+      players: r.players || [],
     })),
     'cr_biasa'
   );
@@ -29,6 +31,7 @@ function AnalyserPreview({ result }) {
     <div className="mt-3 space-y-3">
       <div className="flex flex-wrap gap-3 text-[11px] text-slate-400">
         <span>Model: <span className="font-mono text-white">{result.model || '—'}</span></span>
+        <span>Key slot: <span className="font-mono text-white">{result.keySlot || '—'}</span></span>
         <span>Latency: <span className="font-mono text-white">{result.latencyMs != null ? `${result.latencyMs}ms` : '—'}</span></span>
         <span className={result.ok || result.success ? 'text-emerald' : 'text-crimson'}>
           {result.ok || result.success ? `OK · ${rows.length} baris` : (result.error || 'Gagal')}
@@ -37,30 +40,39 @@ function AnalyserPreview({ result }) {
 
       {rows.length > 0 ? (
         <div className="overflow-x-auto rounded-xl border border-white/10">
-          <table className="w-full min-w-[420px] text-left text-xs">
+          <table className="w-full min-w-[520px] text-left text-xs">
             <thead className="bg-slate-800/80 text-[10px] uppercase tracking-wide text-slate-500">
               <tr>
                 <th className="px-3 py-2">#</th>
-                <th className="px-3 py-2">Tim / Nick Perwakilan</th>
+                <th className="px-3 py-2">Tim</th>
+                <th className="px-3 py-2">Nick</th>
+                <th className="px-3 py-2">4 Players</th>
                 <th className="px-3 py-2 text-right">Kills</th>
                 <th className="px-3 py-2 text-right">Poin</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => (
-                <tr key={r.placement} className="border-t border-white/5 text-slate-200">
-                  <td className="px-3 py-2 font-mono text-gold">{r.placement}</td>
-                  <td className="px-3 py-2 font-medium text-white">{r.nickname || r.teamName}</td>
-                  <td className="px-3 py-2 text-right font-mono">{r.kills}</td>
-                  <td className="px-3 py-2 text-right font-mono font-bold text-emerald">{r.totalPoints}</td>
-                </tr>
-              ))}
+              {rows.map((r, i) => {
+                const players = rawRows[i]?.players || [];
+                return (
+                  <tr key={r.placement} className="border-t border-white/5 text-slate-200 align-top">
+                    <td className="px-3 py-2 font-mono text-gold">{r.placement}</td>
+                    <td className="px-3 py-2 font-medium text-white">{r.teamName}</td>
+                    <td className="px-3 py-2 font-mono text-cyan-300">{r.nickname}</td>
+                    <td className="px-3 py-2 text-[10px] text-slate-400">
+                      {players.length ? players.map((p) => `${p.nickname} (${p.kills ?? 0})`).join(' · ') : '—'}
+                    </td>
+                    <td className="px-3 py-2 text-right font-mono">{r.kills}</td>
+                    <td className="px-3 py-2 text-right font-mono font-bold text-emerald">{r.totalPoints}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
       ) : (
         <p className="rounded-lg bg-crimson/10 px-3 py-2 text-xs text-crimson">
-          Tidak ada baris ter-parse (output kosong / []). Coba screenshot scoreboard yang lebih jelas.
+          Tidak ada baris ter-parse. Coba screenshot scoreboard yang lebih jelas.
         </p>
       )}
 
@@ -109,13 +121,20 @@ export default function AdminPanel() {
   const [resetLoading, setResetLoading] = useState('');
   const [confirmAction, setConfirmAction] = useState(null);
   const [toast, setToast] = useState({ message: '', type: 'info' });
-  const [geminiKeyInput, setGeminiKeyInput] = useState('');
+  const [geminiKeys, setGeminiKeys] = useState(['', '', '']);
   const [geminiBusy, setGeminiBusy] = useState('');
   const [testResult, setTestResult] = useState(null);
 
   const refreshMetrics = async () => {
     const data = await api.getAdminMetrics(pin);
     setMetrics(data);
+    if (data?.gemini?.keys) {
+      setGeminiKeys([
+        data.gemini.keys[0] || '',
+        data.gemini.keys[1] || '',
+        data.gemini.keys[2] || '',
+      ]);
+    }
     return data;
   };
 
@@ -124,8 +143,7 @@ export default function AdminPanel() {
     setLoading(true);
     try {
       await api.verifyAdminPin(pin);
-      const data = await api.getAdminMetrics(pin);
-      setMetrics(data);
+      await refreshMetrics();
       setVerified(true);
     } catch (err) {
       setError(err.message);
@@ -156,9 +174,13 @@ export default function AdminPanel() {
   const saveGeminiKey = async () => {
     setGeminiBusy('save');
     try {
-      const res = await api.updateGeminiKey(pin, geminiKeyInput);
-      setToast({ message: res.configured ? 'Gemini API key saved' : 'API key cleared', type: 'success' });
-      setGeminiKeyInput('');
+      const res = await api.updateGeminiKey(pin, { keys: geminiKeys });
+      setToast({
+        message: res.configured
+          ? `Saved ${res.activeSlots?.length || 0} API key slot(s)`
+          : 'All API keys cleared',
+        type: 'success',
+      });
       await refreshMetrics();
     } catch (err) {
       setToast({ message: err.message, type: 'error' });
@@ -171,9 +193,10 @@ export default function AdminPanel() {
     setGeminiBusy('test');
     setTestResult(null);
     try {
-      const res = await api.testGemini(pin, geminiKeyInput || undefined);
+      const firstFilled = geminiKeys.find((k) => k.trim());
+      const res = await api.testGemini(pin, firstFilled || undefined);
       setTestResult(res);
-      setToast({ message: res.ok ? `Gemini OK (${res.latencyMs}ms)` : res.error, type: res.ok ? 'success' : 'error' });
+      setToast({ message: res.ok ? `Gemini OK key#${res.keySlot || '?'} (${res.latencyMs}ms)` : res.error, type: res.ok ? 'success' : 'error' });
       await refreshMetrics();
     } catch (err) {
       setToast({ message: err.message, type: 'error' });
@@ -270,33 +293,48 @@ export default function AdminPanel() {
             <p className="font-mono text-sm text-white">{g.model || 'gemini-flash-latest'}</p>
           </div>
           <div className="rounded-xl bg-slate-800/50 p-3">
-            <p className="text-[10px] uppercase text-slate-500">Key</p>
-            <p className="font-mono text-sm text-white">{g.maskedKey || '—'}</p>
+            <p className="text-[10px] uppercase text-slate-500">Active Slots</p>
+            <p className="font-mono text-sm text-white">{(g.activeSlots || []).join(', ') || '—'}</p>
           </div>
           <div className="rounded-xl bg-slate-800/50 p-3">
-            <p className="text-[10px] uppercase text-slate-500">Daily Usage</p>
-            <p className="font-mono text-sm text-white">{g.dailyUsage ?? 0}</p>
+            <p className="text-[10px] uppercase text-slate-500">Last Key Used</p>
+            <p className="font-mono text-sm text-white">{g.lastKeySlot != null ? `#${g.lastKeySlot}` : '—'}</p>
           </div>
           <div className="rounded-xl bg-slate-800/50 p-3">
-            <p className="text-[10px] uppercase text-slate-500">Last Latency</p>
-            <p className="font-mono text-sm text-white">{g.lastLatencyMs != null ? `${g.lastLatencyMs}ms` : '—'}</p>
+            <p className="text-[10px] uppercase text-slate-500">Daily / Latency</p>
+            <p className="font-mono text-sm text-white">{g.dailyUsage ?? 0} · {g.lastLatencyMs != null ? `${g.lastLatencyMs}ms` : '—'}</p>
           </div>
         </div>
 
         {g.lastError && <p className="mb-3 text-xs text-crimson">{g.lastError}</p>}
 
-        <div className="flex flex-col gap-3 sm:flex-row">
-          <input
-            type="password"
-            value={geminiKeyInput}
-            onChange={(e) => setGeminiKeyInput(e.target.value)}
-            placeholder="Paste GEMINI_API_KEY…"
-            className="flex-1 rounded-xl border border-white/10 bg-slate-800 px-4 py-2.5 font-mono text-sm text-white"
-          />
-          <Button variant="secondary" onClick={saveGeminiKey} loading={geminiBusy === 'save'}>Update Key</Button>
-          <Button variant="ghost" onClick={runGeminiTest} loading={geminiBusy === 'test'}>
-            <Flask size={16} /> Test Connection
-          </Button>
+        <div className="mb-3 space-y-2">
+          <p className="text-sm font-medium text-white">API Key Switcher (3 slots · Round-Robin + Fallback)</p>
+          <p className="text-xs text-slate-500">Key tampil plaintext. OCR memilih key bergantian; jika limit/error → fallback key berikutnya.</p>
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="flex items-center gap-2">
+              <span className="w-14 shrink-0 text-xs font-bold text-gold">Key {i + 1}</span>
+              <input
+                type="text"
+                value={geminiKeys[i]}
+                onChange={(e) => {
+                  const next = [...geminiKeys];
+                  next[i] = e.target.value;
+                  setGeminiKeys(next);
+                }}
+                placeholder={`Paste GEMINI_API_KEY ${i + 1}…`}
+                className="flex-1 rounded-xl border border-white/10 bg-slate-800 px-4 py-2.5 font-mono text-sm text-white"
+                autoComplete="off"
+                spellCheck={false}
+              />
+            </div>
+          ))}
+          <div className="flex flex-wrap gap-2 pt-1">
+            <Button variant="secondary" onClick={saveGeminiKey} loading={geminiBusy === 'save'}>Save All Keys</Button>
+            <Button variant="ghost" onClick={runGeminiTest} loading={geminiBusy === 'test'}>
+              <Flask size={16} /> Test Connection
+            </Button>
+          </div>
         </div>
 
         <div className="mt-4 rounded-xl border border-dashed border-white/10 p-4">

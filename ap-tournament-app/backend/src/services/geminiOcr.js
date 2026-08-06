@@ -1,40 +1,45 @@
 /**
- * REST Gemini API — MUST use snake_case field names for multimodal parts.
- * camelCase (inlineData) is silently ignored → model only sees text → returns [].
- *
- * JANGAN kirim thinkingConfig ke gemini-flash-latest (Gemini 3):
- * thinkingBudget:0 → 400 "Request contains an invalid argument."
+ * REST Gemini OCR — snake_case multimodal parts, multi-key rotation, 4-player roster.
  */
-import { getGeminiApiKey, bumpGeminiUsage, loadSettings } from '../config/settingsStore.js';
+import {
+  bumpGeminiUsage,
+  getGeminiKeyRotationOrder,
+  loadSettings,
+  saveSettings,
+} from '../config/settingsStore.js';
 
-const SYSTEM_PROMPT = `Analisis screenshot scoreboard Free Fire ini. Ekstrak data semua TIM ke JSON ARRAY murni tanpa teks/markdown tambahan.
+const SYSTEM_PROMPT = `You are a Free Fire scoreboard OCR engine.
+Extract EVERY team row visible in the screenshot into a pure JSON ARRAY. No markdown.
 
-Format wajib:
+REQUIRED format (example):
 [
   {
     "rank": 1,
     "team_name": "EXC",
+    "nickname": "EXC|Captain",
     "kills": 8,
     "players": [
       { "nickname": "EXC|Captain", "kills": 3 },
-      { "nickname": "EXC|Player2", "kills": 2 },
-      { "nickname": "EXC|Player3", "kills": 2 },
-      { "nickname": "EXC|Player4", "kills": 1 }
+      { "nickname": "EXC|P2", "kills": 2 },
+      { "nickname": "EXC|P3", "kills": 2 },
+      { "nickname": "EXC|P4", "kills": 1 }
     ]
   }
 ]
 
-Aturan:
-- rank: integer 1-12 (placement / booyah = 1)
-- team_name: tag tim / nama tim yang terbaca di scoreboard
-- kills: TOTAL kill TIM (integer, 0 jika tidak terbaca)
-- players: array hingga 4 anggota tim (nickname + kills individu jika terlihat)
-  * Jika hanya 1 nick terbaca, isi 1 item; jika 4 terlihat, isi 4
-  * players dipakai sebagai backup roster / substitusi
-- Maksimal 12 baris, urut naik berdasarkan rank
-- Jangan tambahkan markdown, code fence, atau teks penjelasan
-- Baca SEMUA baris yang terlihat — jangan kembalikan [] jika ada data skor/tim
-- Hanya kembalikan [] jika gambar benar-benar kosong / bukan scoreboard`;
+STRICT RULES:
+1. rank = placement integer 1-12 (Booyah = 1).
+2. team_name = clan/team tag shown on the row (NOT empty).
+3. nickname = primary/representative player nick on that row (REQUIRED, never empty).
+4. kills = TOTAL team eliminations for that row (REQUIRED integer >= 0). Read the kill column carefully.
+5. players = up to 4 squad members if visible in match history / scoreboard expand.
+   - Each player MUST have nickname + individual kills when readable.
+   - If only 1 nick is visible, still return players:[{nickname, kills}] with team kills.
+   - If 4 players are visible, return ALL 4.
+6. Sum of player kills should match team kills when possible.
+7. Max 12 teams, sorted by rank ascending.
+8. Return ONLY the JSON array. Never return [] if any scoreboard rows are visible.
+9. Do NOT invent players that are not on screen; but DO extract every visible nick + kill number.`;
 
 const DEFAULT_MODEL = 'gemini-flash-latest';
 
@@ -45,6 +50,7 @@ const RESULT_SCHEMA = {
     properties: {
       rank: { type: 'INTEGER' },
       team_name: { type: 'STRING' },
+      nickname: { type: 'STRING' },
       kills: { type: 'INTEGER' },
       players: {
         type: 'ARRAY',
@@ -54,11 +60,11 @@ const RESULT_SCHEMA = {
             nickname: { type: 'STRING' },
             kills: { type: 'INTEGER' },
           },
-          required: ['nickname'],
+          required: ['nickname', 'kills'],
         },
       },
     },
-    required: ['rank', 'team_name', 'kills'],
+    required: ['rank', 'team_name', 'nickname', 'kills', 'players'],
   },
 };
 
@@ -89,7 +95,6 @@ function extractJson(text) {
         return JSON.parse(fixed);
       } catch { /* fall through */ }
     }
-
     const objectMatch = cleanResponse.match(/\{[\s\S]*\}/);
     if (objectMatch) {
       try {
@@ -100,7 +105,6 @@ function extractJson(text) {
       }
     }
   }
-
   return null;
 }
 
@@ -110,20 +114,21 @@ function parseLooseLines(text) {
   const seen = new Set();
   String(text).split(/\r?\n/).forEach((line) => {
     const m = line.match(
-      /(?:^|\b)(\d{1,2})[.)\s:-]+([A-Za-z0-9_\-!?.][A-Za-z0-9_\-!?.\s]{0,28}?)\s+(\d{1,3})\b/
+      /(?:^|\b)(\d{1,2})[.)\s:-]+([A-Za-z0-9_\-!?.|][A-Za-z0-9_\-!?.|\s]{0,32}?)\s+(\d{1,3})\b/
     );
     if (!m) return;
     const rank = parseInt(m[1], 10);
     if (rank < 1 || rank > 12 || seen.has(rank)) return;
     seen.add(rank);
     const nick = m[2].trim();
+    const kills = parseInt(m[3], 10) || 0;
     results.push({
       rank,
       placement: rank,
       teamName: nick,
       nickname: nick,
-      kills: parseInt(m[3], 10) || 0,
-      players: [{ nickname: nick, kills: parseInt(m[3], 10) || 0 }],
+      kills,
+      players: [{ nickname: nick, kills }],
     });
   });
   return results.sort((a, b) => a.rank - b.rank);
@@ -134,20 +139,22 @@ function normalizePlayers(raw, fallbackNick, teamKills) {
     : Array.isArray(raw?.players) ? raw.players
       : [];
 
-  const players = list
+  let players = list
     .map((p) => {
       if (typeof p === 'string') return { nickname: p.trim(), kills: 0 };
       return {
-        nickname: String(p.nickname || p.name || p.player || '').trim(),
-        kills: parseInt(p.kills ?? p.kill ?? 0, 10) || 0,
+        nickname: String(p.nickname || p.name || p.player || p.ign || '').trim(),
+        kills: parseInt(p.kills ?? p.kill ?? p.elim ?? 0, 10) || 0,
       };
     })
     .filter((p) => p.nickname)
     .slice(0, 4);
 
   if (!players.length && fallbackNick) {
-    players.push({ nickname: fallbackNick, kills: teamKills || 0 });
+    players = [{ nickname: fallbackNick, kills: teamKills || 0 }];
   }
+
+  // Pad empty slots only when we have at least one nick (keep real data first)
   return players;
 }
 
@@ -162,21 +169,38 @@ function normalizeResults(parsed) {
 
   return list
     .map((r) => {
-      const teamName = String(r.team_name || r.teamName || r.nickname || r.name || r.player || '').trim();
-      const kills = parseInt(r.kills ?? r.kill ?? r.elim ?? r.eliminations ?? 0, 10) || 0;
-      const rank = parseInt(r.rank ?? r.placement ?? r.place, 10);
-      const players = normalizePlayers(r.players || r.members || r.roster, teamName, kills);
-      const nickname = players[0]?.nickname || teamName;
+      const teamName = String(r.team_name || r.teamName || r.clan || r.name || '').trim();
+      let nickname = String(r.nickname || r.player || r.ign || r.representative || '').trim();
+      let kills = parseInt(r.kills ?? r.kill ?? r.elim ?? r.eliminations ?? r.total_kills, 10);
+      if (Number.isNaN(kills)) kills = 0;
+
+      const players = normalizePlayers(
+        r.players || r.members || r.roster || r.squad,
+        nickname || teamName,
+        kills
+      );
+
+      if (!nickname) nickname = players[0]?.nickname || teamName;
+
+      // If team kills missing/0 but players have kills, sum them
+      const playerKillSum = players.reduce((s, p) => s + (p.kills || 0), 0);
+      if ((!kills || kills === 0) && playerKillSum > 0) kills = playerKillSum;
+
+      // Ensure players[0] nick aligns with representative
+      if (players.length && nickname && players[0].nickname !== nickname) {
+        // keep players as-is; nickname is representative
+      }
+
       return {
-        rank,
-        placement: rank,
-        teamName,
+        rank: parseInt(r.rank ?? r.placement ?? r.place, 10),
+        placement: parseInt(r.rank ?? r.placement ?? r.place, 10),
+        teamName: teamName || nickname,
         nickname,
         kills,
         players,
       };
     })
-    .filter((r) => r.rank >= 1 && r.rank <= 12 && r.teamName)
+    .filter((r) => r.rank >= 1 && r.rank <= 12 && (r.teamName || r.nickname))
     .sort((a, b) => a.rank - b.rank);
 }
 
@@ -184,7 +208,6 @@ function getModelName() {
   const fromSettings = loadSettings().geminiModel;
   const fromEnv = process.env.GEMINI_MODEL;
   const raw = (fromSettings || fromEnv || DEFAULT_MODEL).trim();
-
   if (/^gemini-(1\.0|1\.5|2\.0|2\.5)(-|$)/i.test(raw) || raw === 'gemini-pro' || raw === 'gemini-flash') {
     return DEFAULT_MODEL;
   }
@@ -195,25 +218,27 @@ function extractTextFromResponse(data) {
   const candidates = data?.candidates || [];
   if (!candidates.length) {
     const block = data?.promptFeedback?.blockReason || data?.promptFeedback?.block_reason;
-    return {
-      text: '',
-      finishReason: null,
-      blockReason: block || 'NO_CANDIDATES',
-    };
+    return { text: '', finishReason: null, blockReason: block || 'NO_CANDIDATES' };
   }
-
   const candidate = candidates[0];
   const finishReason = candidate.finishReason || candidate.finish_reason || null;
   const parts = candidate?.content?.parts || [];
-
   const text = parts
     .filter((p) => typeof p.text === 'string' && !p.thought)
     .map((p) => p.text)
     .join('')
     .trim()
     || parts.map((p) => p.text || '').join('').trim();
-
   return { text, finishReason, blockReason: null };
+}
+
+function isRetryableKeyError(err) {
+  const msg = err?.message || '';
+  const status = err?.status;
+  return (
+    status === 401 || status === 403 || status === 429 || status === 503
+    || /RESOURCE_EXHAUSTED|rate limit|quota|UNAUTHENTICATED|PERMISSION_DENIED|Too Many Requests/i.test(msg)
+  );
 }
 
 async function callGeminiGenerateContent({ apiKey, model, parts, useSchema = true }) {
@@ -237,13 +262,11 @@ async function callGeminiGenerateContent({ apiKey, model, parts, useSchema = tru
   });
 
   const generationConfig = {
-    temperature: 0.1,
+    temperature: 0.05,
     maxOutputTokens: 8192,
     responseMimeType: 'application/json',
   };
-  if (useSchema) {
-    generationConfig.responseSchema = RESULT_SCHEMA;
-  }
+  if (useSchema) generationConfig.responseSchema = RESULT_SCHEMA;
 
   try {
     const res = await fetch(url, {
@@ -270,8 +293,7 @@ async function callGeminiGenerateContent({ apiKey, model, parts, useSchema = tru
       throw err;
     }
 
-    const extracted = extractTextFromResponse(data);
-    return { ...extracted, raw: data, model };
+    return { ...extractTextFromResponse(data), raw: data, model };
   } finally {
     if (prevVertex !== undefined) process.env.GOOGLE_GENAI_USE_VERTEXAI = prevVertex;
   }
@@ -279,19 +301,14 @@ async function callGeminiGenerateContent({ apiKey, model, parts, useSchema = tru
 
 function friendlyAuthError(err) {
   const msg = err?.message || String(err);
-  if (
-    err?.status === 401
-    || /UNAUTHENTICATED|ACCESS_TOKEN_TYPE_UNSUPPORTED|invalid authentication/i.test(msg)
-  ) {
-    return (
-      'Gemini API key ditolak (401). Buat key baru di https://aistudio.google.com/apikey '
-      + 'dan pastikan Generative Language API aktif.'
-    );
+  if (err?.status === 401 || /UNAUTHENTICATED|invalid authentication/i.test(msg)) {
+    return 'Gemini API key ditolak (401). Cek Key 1–3 di Admin Panel.';
   }
-  if (err?.status === 404 || /no longer available|not found|NOT_FOUND/i.test(msg)) {
-    return (
-      `Model tidak tersedia (${msg}). Gunakan alias gemini-flash-latest — jangan pin ke 2.0/2.5/1.5.`
-    );
+  if (err?.status === 429 || /RESOURCE_EXHAUSTED|rate limit|quota/i.test(msg)) {
+    return 'Quota/rate limit. Sistem akan coba key lain jika tersedia.';
+  }
+  if (err?.status === 404 || /no longer available|NOT_FOUND/i.test(msg)) {
+    return `Model tidak tersedia (${msg}). Gunakan gemini-flash-latest.`;
   }
   return msg;
 }
@@ -308,135 +325,148 @@ async function generateOcrContent(apiKey, model, parts) {
 }
 
 export async function runGeminiVisionOcr(imageBuffer, mimeType = 'image/png') {
-  const apiKey = getGeminiApiKey();
-  if (!apiKey) {
-    return { success: false, error: 'GEMINI_API_KEY not configured', engine: 'gemini', text: '', results: [] };
+  const keyOrder = getGeminiKeyRotationOrder();
+  if (!keyOrder.length) {
+    return { success: false, error: 'GEMINI_API_KEY not configured (isi Key 1–3 di Admin)', engine: 'gemini', text: '', results: [] };
   }
 
   const started = Date.now();
-  try {
-    const model = getModelName();
-    const base64 = Buffer.isBuffer(imageBuffer)
-      ? imageBuffer.toString('base64')
-      : Buffer.from(imageBuffer).toString('base64');
+  const model = getModelName();
+  const base64 = Buffer.isBuffer(imageBuffer)
+    ? imageBuffer.toString('base64')
+    : Buffer.from(imageBuffer).toString('base64');
 
-    const parts = [
-      { text: SYSTEM_PROMPT },
-      {
-        inline_data: {
-          mime_type: mimeType || 'image/png',
-          data: base64,
-        },
-      },
-    ];
+  const parts = [
+    { text: SYSTEM_PROMPT },
+    { inline_data: { mime_type: mimeType || 'image/png', data: base64 } },
+  ];
 
-    const { text, finishReason, blockReason, raw } = await generateOcrContent(apiKey, model, parts);
+  let lastError = null;
 
-    const latency = Date.now() - started;
+  for (const { key, slot } of keyOrder) {
+    try {
+      saveSettings({ geminiLastKeySlot: slot + 1 });
+      const { text, finishReason, blockReason, raw } = await generateOcrContent(key, model, parts);
+      const latency = Date.now() - started;
 
-    if (blockReason) {
-      const error = `Gemini memblokir request (${blockReason})`;
-      bumpGeminiUsage(latency, false, error);
+      if (blockReason) {
+        lastError = `Gemini memblokir request (${blockReason})`;
+        bumpGeminiUsage(latency, false, lastError, slot + 1);
+        continue;
+      }
+
+      let results = normalizeResults(extractJson(text));
+      if (!results.length) results = parseLooseLines(text);
+
+      if (!results.length) {
+        lastError = (text || '').slice(0, 240)
+          ? `No results parsed. Raw: ${(text || '').slice(0, 240)}`
+          : `No results parsed (finishReason=${finishReason || 'unknown'})`;
+        bumpGeminiUsage(latency, false, lastError.slice(0, 240), slot + 1);
+        // Don't rotate key for empty parse — content issue, not key limit
+        return {
+          success: false,
+          error: lastError,
+          engine: 'gemini',
+          text: text || '',
+          results: [],
+          latencyMs: latency,
+          model,
+          finishReason,
+          rawPreview: (text || '').slice(0, 500),
+          keySlot: slot + 1,
+          candidateCount: raw?.candidates?.length ?? 0,
+        };
+      }
+
+      bumpGeminiUsage(latency, true, '', slot + 1);
+      const textLines = results.map((r) => {
+        const roster = (r.players || []).map((p) => `${p.nickname}(${p.kills})`).join(', ');
+        return `${r.rank} ${r.teamName} | nick:${r.nickname} | ${r.kills} Kill | [${roster}]`;
+      }).join('\n');
+
       return {
-        success: false, error, engine: 'gemini', text: text || '', results: [], latencyMs: latency, model, finishReason, blockReason,
-      };
-    }
-
-    let results = normalizeResults(extractJson(text));
-    if (!results.length) {
-      results = parseLooseLines(text);
-    }
-
-    if (!results.length) {
-      const preview = (text || '').slice(0, 500);
-      const error = preview
-        ? `No results parsed. Raw: ${preview}`
-        : `No results parsed (empty text, finishReason=${finishReason || 'unknown'})`;
-      bumpGeminiUsage(latency, false, error.slice(0, 240));
-      return {
-        success: false,
-        error,
+        success: true,
         engine: 'gemini',
-        text: text || '',
-        results: [],
+        text: textLines,
+        results,
         latencyMs: latency,
+        raw: text,
         model,
         finishReason,
-        rawPreview: preview,
-        candidateCount: raw?.candidates?.length ?? 0,
+        keySlot: slot + 1,
       };
+    } catch (err) {
+      lastError = friendlyAuthError(err);
+      bumpGeminiUsage(Date.now() - started, false, lastError, slot + 1);
+      if (isRetryableKeyError(err) && keyOrder.length > 1) {
+        continue; // fallback next key
+      }
+      break;
     }
-
-    bumpGeminiUsage(latency, true);
-    const textLines = results.map((r) => {
-      const roster = (r.players || []).map((p) => p.nickname).join(', ');
-      return `${r.rank} ${r.teamName} ${r.kills} Kill [${roster}]`;
-    }).join('\n');
-
-    return {
-      success: true,
-      engine: 'gemini',
-      text: textLines,
-      results,
-      latencyMs: latency,
-      raw: text,
-      model,
-      finishReason,
-    };
-  } catch (err) {
-    const latency = Date.now() - started;
-    const error = friendlyAuthError(err);
-    bumpGeminiUsage(latency, false, error);
-    return {
-      success: false,
-      error,
-      engine: 'gemini',
-      text: '',
-      results: [],
-      latencyMs: latency,
-      model: getModelName(),
-    };
   }
+
+  return {
+    success: false,
+    error: lastError || 'OCR failed',
+    engine: 'gemini',
+    text: '',
+    results: [],
+    latencyMs: Date.now() - started,
+    model: getModelName(),
+  };
 }
 
 export async function testGeminiConnection(apiKeyOverride) {
-  const apiKey = (apiKeyOverride || getGeminiApiKey() || '').trim();
-  if (!apiKey) return { ok: false, error: 'No API key set' };
-
   const started = Date.now();
-  try {
-    const model = getModelName();
-    const prevVertex = process.env.GOOGLE_GENAI_USE_VERTEXAI;
-    delete process.env.GOOGLE_GENAI_USE_VERTEXAI;
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
+  const keys = apiKeyOverride?.trim()
+    ? [{ key: apiKeyOverride.trim(), slot: 0 }]
+    : getGeminiKeyRotationOrder();
 
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-goog-api-key': apiKey,
-      },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: 'Reply with exactly: OK' }] }],
-      }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (prevVertex !== undefined) process.env.GOOGLE_GENAI_USE_VERTEXAI = prevVertex;
+  if (!keys.length) return { ok: false, error: 'No API key set' };
 
-    if (!res.ok) {
-      const err = new Error(data?.error?.message || `HTTP ${res.status}`);
-      err.status = res.status;
-      throw err;
+  const model = getModelName();
+  let lastError = '';
+
+  for (const { key, slot } of keys) {
+    try {
+      const prevVertex = process.env.GOOGLE_GENAI_USE_VERTEXAI;
+      delete process.env.GOOGLE_GENAI_USE_VERTEXAI;
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+        body: JSON.stringify({ contents: [{ parts: [{ text: 'Reply with exactly: OK' }] }] }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (prevVertex !== undefined) process.env.GOOGLE_GENAI_USE_VERTEXAI = prevVertex;
+
+      if (!res.ok) {
+        const err = new Error(data?.error?.message || `HTTP ${res.status}`);
+        err.status = res.status;
+        throw err;
+      }
+
+      const { text } = extractTextFromResponse(data);
+      saveSettings({ geminiLastKeySlot: slot + 1 });
+      return {
+        ok: true,
+        latencyMs: Date.now() - started,
+        sample: (text || '').slice(0, 40),
+        model,
+        keySlot: slot + 1,
+      };
+    } catch (err) {
+      lastError = friendlyAuthError(err);
+      if (isRetryableKeyError(err)) continue;
+      break;
     }
-
-    const { text } = extractTextFromResponse(data);
-    return { ok: true, latencyMs: Date.now() - started, sample: (text || '').slice(0, 40), model };
-  } catch (err) {
-    return {
-      ok: false,
-      error: friendlyAuthError(err),
-      latencyMs: Date.now() - started,
-      model: getModelName(),
-    };
   }
+
+  return {
+    ok: false,
+    error: lastError || 'Connection failed',
+    latencyMs: Date.now() - started,
+    model: getModelName(),
+  };
 }

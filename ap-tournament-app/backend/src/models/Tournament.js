@@ -23,24 +23,8 @@ const tournamentSchema = new mongoose.Schema(
     },
     leaderboardSubtitle: { type: String, default: 'KLASEMEN GRAND FINAL' },
     certificateTemplate: String,
-    certificatePlaceholders: {
-      teamName: { x: { type: Number, default: 50 }, y: { type: Number, default: 48 } },
-      rank: { x: { type: Number, default: 50 }, y: { type: Number, default: 38 } },
-      tournamentName: { x: { type: Number, default: 50 }, y: { type: Number, default: 58 } },
-      date: { x: { type: Number, default: 50 }, y: { type: Number, default: 68 } },
-    },
-    certificateStyle: {
-      displayFont: { type: String, default: 'Orbitron' },
-      bodyFont: { type: String, default: 'Montserrat' },
-      rankWeight: { type: String, default: '800' },
-      teamWeight: { type: String, default: '700' },
-      colors: {
-        rank: { type: String, default: '#F59E0B' },
-        team: { type: String, default: '#FFF7ED' },
-        tournament: { type: String, default: '#FCD34D' },
-        date: { type: String, default: '#A8A29E' },
-      },
-    },
+    certificatePlaceholders: { type: mongoose.Schema.Types.Mixed, default: {} },
+    certificateStyle: { type: mongoose.Schema.Types.Mixed, default: {} },
     teams: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Team' }],
   },
   { timestamps: true }
