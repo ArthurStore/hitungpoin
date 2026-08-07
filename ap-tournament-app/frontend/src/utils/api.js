@@ -14,16 +14,64 @@ function resolveApiBase() {
       return `${protocol}//${hostname}:5001/api`;
     }
   }
-  return '/api';
+  return '/hitungpoin/api';
 }
 
 export const API_BASE = resolveApiBase();
 
+/** Public base path when app is served under Nginx sub-path */
+export const APP_BASE = '/hitungpoin';
+
+/**
+ * Normalize any stored upload URL to a clean relative path:
+ * `/uploads/logos/file.ext` (no host, no /hitungpoin prefix).
+ */
+export function toRelativeUploadPath(path) {
+  if (!path || typeof path !== 'string') return '';
+  const raw = path.trim();
+  if (!raw || raw.startsWith('data:') || raw.startsWith('blob:')) return raw;
+
+  let clean = raw.replace(/\\/g, '/');
+  try {
+    if (/^https?:\/\//i.test(clean)) {
+      clean = new URL(clean).pathname;
+    }
+  } catch {
+    /* keep clean as-is */
+  }
+
+  clean = clean.replace(/^\/hitungpoin(?=\/)/i, '');
+  clean = clean.replace(/^\/api(?=\/uploads\/)/i, '');
+
+  const idx = clean.toLowerCase().indexOf('/uploads/');
+  if (idx !== -1) {
+    return clean.slice(idx);
+  }
+  if (/^uploads\//i.test(clean)) {
+    return `/${clean}`;
+  }
+  return clean.startsWith('/') ? clean : `/${clean}`;
+}
+
+/**
+ * Browser URL for uploaded assets under Nginx sub-path `/hitungpoin/`.
+ * Handles relative paths, bare `uploads/...`, and legacy absolute IP URLs.
+ */
 export function resolveAssetUrl(path) {
-  if (!path) return '';
-  if (path.startsWith('data:') || path.startsWith('http') || path.startsWith('blob:')) return path;
-  const origin = API_BASE.replace(/\/api\/?$/, '');
-  return `${origin}${path.startsWith('/') ? path : `/${path}`}`;
+  if (!path || typeof path !== 'string') return '';
+  const raw = path.trim();
+  if (!raw) return '';
+  if (raw.startsWith('data:') || raw.startsWith('blob:')) return raw;
+
+  const relative = toRelativeUploadPath(raw);
+  if (!relative || relative.startsWith('data:') || relative.startsWith('blob:')) return relative;
+
+  if (relative.startsWith('/uploads/')) {
+    return `${APP_BASE}${relative}`;
+  }
+  if (relative.startsWith(`${APP_BASE}/`)) return relative;
+  if (relative.startsWith('/')) return `${APP_BASE}${relative}`;
+  return `${APP_BASE}/${relative}`;
 }
 
 function getToken() {

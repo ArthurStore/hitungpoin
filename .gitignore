@@ -1,1 +1,25 @@
 **/node_modules/
+
+# Dynamic / sensitive backend data (Gemini keys, runtime settings)
+backend/data/
+**/backend/data/
+**/backend/data/settings.json
+
+# Uploaded media (logos, certificates) — served at runtime, not from git
+**/backend/uploads/
+**/backend/data/uploads/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+# Build / editor junk
+**/dist/
+**/.vite/
+*.swp
+*.swo
+.DS_Store

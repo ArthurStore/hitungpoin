@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { Trophy } from '@phosphor-icons/react';
-import { api } from '../../utils/api';
+import { api, resolveAssetUrl } from '../../utils/api';
 import ThemeToggle from '../../components/ThemeToggle';
 import { MatchTreeHeaders, matchColumnCount } from '../../components/MatchTreeHeaders';
 
@@ -56,7 +56,16 @@ export default function LiveStandings() {
       <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col">
         <div className="mb-4 shrink-0 text-center">
           <div className="mb-2 flex items-center justify-center gap-2">
-            <Trophy size={24} className="text-gold" weight="fill" />
+            {resolveAssetUrl(tournament.logo || tournament.logoUrl) ? (
+              <img
+                src={resolveAssetUrl(tournament.logo || tournament.logoUrl)}
+                alt=""
+                className="h-10 w-10 rounded-lg object-contain"
+                crossOrigin="anonymous"
+              />
+            ) : (
+              <Trophy size={24} className="text-gold" weight="fill" />
+            )}
             <span className="text-xs font-medium uppercase tracking-wider text-emerald">Live Leaderboard</span>
           </div>
           <h1 className="text-3xl font-bold text-white light:text-slate-900">{tournament.name}</h1>

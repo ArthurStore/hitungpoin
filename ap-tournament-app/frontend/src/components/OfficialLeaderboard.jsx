@@ -37,7 +37,7 @@ export default function OfficialLeaderboard({
   const totalMatches = tournament?.totalMatches || matches.length || 6;
   const matchNumbers = Array.from({ length: totalMatches }, (_, i) => i + 1);
   const subtitle = tournament?.leaderboardSubtitle || 'KLASEMEN GRAND FINAL';
-  const logoUrl = resolveAssetUrl(tournament?.logo);
+  const logoUrl = resolveAssetUrl(tournament?.logo || tournament?.logoUrl);
   const mode = tournament?.inputMode || 'cr_biasa';
   const rows = standings.slice(0, MAX_TEAMS);
   const n = Math.max(rows.length, 1);
@@ -88,7 +88,7 @@ export default function OfficialLeaderboard({
 
             <div className="flex h-14 w-20 shrink-0 items-center justify-center">
               <img
-                src="/free-fire-logo.png"
+                src="/hitungpoin/free-fire-logo.png"
                 alt="Free Fire"
                 className="h-full w-full object-contain"
                 crossOrigin="anonymous"

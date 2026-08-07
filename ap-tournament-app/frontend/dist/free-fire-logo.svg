@@ -1,7 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" fill="none">
-  <rect width="120" height="120" rx="16" fill="#0a0a0a"/>
-  <path d="M60 18 L72 42 H48 Z" fill="#FF6B00"/>
-  <path d="M38 48 H82 V54 C82 68 72 80 60 84 C48 80 38 68 38 54 Z" fill="#FF4500"/>
-  <ellipse cx="60" cy="90" rx="22" ry="6" fill="#FF6B00" opacity="0.6"/>
-  <text x="60" y="72" text-anchor="middle" fill="white" font-family="Arial Black, sans-serif" font-size="14" font-weight="900">FF</text>
-</svg>

@@ -1,4 +1,5 @@
 import html2canvas from 'html2canvas';
+import { resolveAssetUrl } from './api';
 
 export async function exportElementAsPNG(element, filename) {
   const canvas = await html2canvas(element, {
@@ -105,7 +106,7 @@ export async function generateAllCertificates(tournament, standings) {
       tournamentName: tournament.name,
       date,
       totalPoints: team.totalPoints,
-      logoUrl: tournament.logo,
+      logoUrl: resolveAssetUrl(tournament.logo || tournament.logoUrl),
     });
     certs.push({ rank: i + 1, teamName: team.teamName, ...cert });
   }

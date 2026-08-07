@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { io } from 'socket.io-client';
-import { api, API_BASE } from '../../utils/api';
+import { api, API_BASE, resolveAssetUrl } from '../../utils/api';
 import { MatchTreeHeaders, MatchScoreCells, matchColumnCount } from '../../components/MatchTreeHeaders';
 
 function socketOrigin() {
@@ -149,14 +149,24 @@ export default function ObsOverlay() {
       </div>
 
       <div className="relative z-10 flex h-full min-h-0 w-full flex-col justify-between overflow-hidden rounded-lg border border-cyan-400/25 bg-slate-950/35 px-2 py-1.5 shadow-[0_0_40px_rgba(34,211,238,0.12)] backdrop-blur-[2px] sm:px-3 sm:py-2">
-        <header className="flex w-full shrink-0 items-center justify-between border-b border-cyan-400/35 pb-1.5">
-          <div className="min-w-0">
-            <h1 className="font-display text-2xl font-black uppercase leading-none tracking-[0.18em] text-white drop-shadow-[0_0_16px_#22d3ee] sm:text-3xl md:text-4xl">
-              LIVE SCORE
-            </h1>
-            <p className="mt-1 truncate text-[11px] uppercase tracking-[0.28em] text-cyan-300/90 sm:text-xs">
-              {tournament.name}
-            </p>
+        <header className="flex w-full shrink-0 items-center justify-between gap-2 border-b border-cyan-400/35 pb-1.5">
+          <div className="flex min-w-0 items-center gap-2">
+            {resolveAssetUrl(tournament.logo || tournament.logoUrl) ? (
+              <img
+                src={resolveAssetUrl(tournament.logo || tournament.logoUrl)}
+                alt=""
+                className="h-10 w-10 shrink-0 object-contain sm:h-12 sm:w-12"
+                crossOrigin="anonymous"
+              />
+            ) : null}
+            <div className="min-w-0">
+              <h1 className="font-display text-2xl font-black uppercase leading-none tracking-[0.18em] text-white drop-shadow-[0_0_16px_#22d3ee] sm:text-3xl md:text-4xl">
+                LIVE SCORE
+              </h1>
+              <p className="mt-1 truncate text-[11px] uppercase tracking-[0.28em] text-cyan-300/90 sm:text-xs">
+                {tournament.name}
+              </p>
+            </div>
           </div>
           <span className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-bold ${
             connected ? 'bg-emerald/25 text-emerald shadow-[0_0_12px_rgba(16,185,129,0.35)]' : 'bg-white/10 text-white/50'
