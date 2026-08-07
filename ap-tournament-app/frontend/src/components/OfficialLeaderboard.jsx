@@ -70,6 +70,7 @@ export default function OfficialLeaderboard({
                   className="h-full w-full object-contain"
                   crossOrigin="anonymous"
                   style={{ background: 'transparent', border: 'none' }}
+                  onError={(e) => { e.currentTarget.style.display = 'none'; }}
                 />
               ) : null}
             </div>

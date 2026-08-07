@@ -52,7 +52,14 @@ export default function Dashboard() {
                     {t.status}
                   </span>
                 </div>
-                {t.logo && <img src={resolveAssetUrl(t.logo)} alt="" className="h-10 w-10 rounded-lg object-cover" />}
+                {(t.logo || t.logoUrl) && (
+                  <img
+                    src={resolveAssetUrl(t.logo || t.logoUrl)}
+                    alt=""
+                    className="h-10 w-10 rounded-lg object-cover"
+                    onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                  />
+                )}
               </div>
               <div className="mt-4 flex gap-2">
                 <Button variant="primary" size="sm" className="flex-1" onClick={() => navigate(`/tournament/${t._id}`)}>

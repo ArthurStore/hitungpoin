@@ -23,8 +23,8 @@ export const API_BASE = resolveApiBase();
 export const APP_BASE = '/hitungpoin';
 
 /**
- * Normalize any stored upload URL to a clean relative path:
- * `/uploads/logos/file.ext` (no host, no /hitungpoin prefix).
+ * Normalize any stored upload URL to a clean relative path for DB/state:
+ * `/uploads/logos/file.ext` (no host, no /hitungpoin, no /api prefix).
  */
 export function toRelativeUploadPath(path) {
   if (!path || typeof path !== 'string') return '';
@@ -40,38 +40,44 @@ export function toRelativeUploadPath(path) {
     /* keep clean as-is */
   }
 
-  clean = clean.replace(/^\/hitungpoin(?=\/)/i, '');
-  clean = clean.replace(/^\/api(?=\/uploads\/)/i, '');
-
-  const idx = clean.toLowerCase().indexOf('/uploads/');
-  if (idx !== -1) {
-    return clean.slice(idx);
+  if (clean.includes('/uploads/')) {
+    const parts = clean.split('/uploads/');
+    return `/uploads/${parts[parts.length - 1]}`;
   }
-  if (/^uploads\//i.test(clean)) {
-    return `/${clean}`;
-  }
+  if (/^uploads\//i.test(clean)) return `/${clean}`;
   return clean.startsWith('/') ? clean : `/${clean}`;
 }
 
 /**
  * Browser URL for uploaded assets under Nginx sub-path `/hitungpoin/`.
- * Handles relative paths, bare `uploads/...`, and legacy absolute IP URLs.
+ *
+ * Uses `/hitungpoin/api/uploads/...` (Express: app.use('/api/uploads', ...))
+ * so logos work when VPS Nginx only proxies `/hitungpoin/api/` (common cause of 404
+ * for bare `/hitungpoin/uploads/...`).
+ *
+ * Also accepts legacy absolute IP URLs like http://x:5001/uploads/logos/file.png
  */
 export function resolveAssetUrl(path) {
-  if (!path || typeof path !== 'string') return '';
-  const raw = path.trim();
-  if (!raw) return '';
-  if (raw.startsWith('data:') || raw.startsWith('blob:')) return raw;
+  if (!path) return '';
+  if (path.startsWith('data:') || path.startsWith('blob:')) return path;
 
-  const relative = toRelativeUploadPath(raw);
-  if (!relative || relative.startsWith('data:') || relative.startsWith('blob:')) return relative;
-
-  if (relative.startsWith('/uploads/')) {
-    return `${APP_BASE}${relative}`;
+  let clean = String(path).trim().replace(/\\/g, '/');
+  try {
+    if (/^https?:\/\//i.test(clean)) {
+      clean = new URL(clean).pathname;
+    }
+  } catch {
+    /* keep clean */
   }
-  if (relative.startsWith(`${APP_BASE}/`)) return relative;
-  if (relative.startsWith('/')) return `${APP_BASE}${relative}`;
-  return `${APP_BASE}/${relative}`;
+
+  if (clean.includes('/uploads/')) {
+    const parts = clean.split('/uploads/');
+    const rest = parts[parts.length - 1]; // e.g. logos/filename.ext
+    // Primary: via API static mount (already proxied on most VPS setups)
+    return `/hitungpoin/api/uploads/${rest}`;
+  }
+
+  return clean.startsWith('/') ? `/hitungpoin${clean}` : `/hitungpoin/${clean}`;
 }
 
 function getToken() {

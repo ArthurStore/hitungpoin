@@ -178,7 +178,34 @@ docker compose logs -f
 
 ## Step 5 — Nginx Reverse Proxy & HTTPS
 
-Contoh server block (domain `poin.example.com` → frontend, `/api` → backend):
+### Sub-path `/hitungpoin/` (produksi arthurg.my.id)
+
+Logo/upload dilayani lewat **`/hitungpoin/api/uploads/`** (Express static).
+Pastikan block API ada; opsional juga proxy `/hitungpoin/uploads/`.
+
+```nginx
+location /hitungpoin/api/ {
+    proxy_pass http://127.0.0.1:5001/api/;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    client_max_body_size 50M;
+}
+
+# Opsional — jika ingin URL /hitungpoin/uploads/... langsung
+location /hitungpoin/uploads/ {
+    proxy_pass http://127.0.0.1:5001/uploads/;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+}
+
+location /hitungpoin/ {
+    alias /var/www/hitungpoin/frontend/dist/;
+    try_files $uri $uri/ /hitungpoin/index.html;
+}
+```
+
+### Root domain (tanpa sub-path)
 
 ```nginx
 server {
@@ -200,6 +227,12 @@ server {
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         client_max_body_size 50M;
+    }
+
+    location /uploads/ {
+        proxy_pass http://127.0.0.1:5001/uploads/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
     }
 
     location /socket.io/ {
