@@ -3,6 +3,7 @@ import { PencilSimple } from '@phosphor-icons/react';
 
 /**
  * Click-to-edit team name. Commits on Enter/blur; Esc cancels.
+ * Always uses min-w-0 / w-full so Rank #1 is not clipped to "…"
  */
 export default function InlineTeamName({
   name,
@@ -54,6 +55,7 @@ export default function InlineTeamName({
         disabled={saving || disabled}
         onChange={(e) => setValue(e.target.value)}
         onBlur={commit}
+        onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => {
           if (e.key === 'Enter') {
             e.preventDefault();
@@ -73,13 +75,16 @@ export default function InlineTeamName({
     <button
       type="button"
       disabled={disabled}
-      onClick={() => !disabled && setEditing(true)}
+      onClick={(e) => {
+        e.stopPropagation();
+        if (!disabled) setEditing(true);
+      }}
       title="Klik untuk edit nama tim"
-      className={`group inline-flex max-w-full items-center gap-1 text-left ${className}`}
+      className={`group flex w-full min-w-0 max-w-full items-center gap-1 text-left ${className}`}
     >
-      <span className="truncate">{name}</span>
+      <span className="min-w-0 flex-1 truncate">{name || '—'}</span>
       {showIcon && (
-        <PencilSimple size={12} className="shrink-0 opacity-0 transition group-hover:opacity-70" />
+        <PencilSimple size={12} className="shrink-0 opacity-40 transition group-hover:opacity-100" />
       )}
     </button>
   );

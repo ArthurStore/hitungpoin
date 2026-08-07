@@ -14,6 +14,24 @@ function slugify(name = '') {
 
 const MAX_OVERLAY_TEAMS = 15;
 
+const TOP3 = {
+  1: {
+    row: 'border-amber-400/55 bg-gradient-to-r from-amber-500/25 via-yellow-500/12 to-transparent',
+    glow: '0 0 22px rgba(245,158,11,0.35), inset 0 0 24px rgba(251,191,36,0.08)',
+    medal: '🥇',
+  },
+  2: {
+    row: 'border-slate-300/50 bg-gradient-to-r from-slate-300/22 via-slate-400/10 to-transparent',
+    glow: '0 0 18px rgba(203,213,225,0.28), inset 0 0 20px rgba(148,163,184,0.06)',
+    medal: '🥈',
+  },
+  3: {
+    row: 'border-amber-600/50 bg-gradient-to-r from-amber-700/25 via-orange-600/12 to-transparent',
+    glow: '0 0 18px rgba(217,119,6,0.3), inset 0 0 20px rgba(180,83,9,0.07)',
+    medal: '🥉',
+  },
+};
+
 export default function ObsOverlay() {
   const { tournamentSlug } = useParams();
   const [payload, setPayload] = useState(null);
@@ -69,7 +87,6 @@ export default function ObsOverlay() {
     });
 
     const poll = setInterval(load, 20000);
-    // Slower dramatic cycle
     const anim = setInterval(() => {
       setEnterFrom((f) => (f === 'left' ? 'right' : 'left'));
       setTick((t) => t + 1);
@@ -93,7 +110,7 @@ export default function ObsOverlay() {
   const matchNumbers = Array.from({ length: totalMatches }, (_, i) => i + 1);
   const matchCols = matchColumnCount(totalMatches, mode);
   const n = Math.max(standings.length, 1);
-  const gridCols = `36px minmax(0,1.45fr) repeat(${matchCols}, minmax(0,1fr)) 56px`;
+  const gridCols = `48px minmax(0,1.45fr) repeat(${matchCols}, minmax(0,1fr)) 56px`;
 
   if (!tournament) {
     return (
@@ -112,7 +129,6 @@ export default function ObsOverlay() {
         background: 'linear-gradient(165deg, #020617 0%, #071428 28%, #0b1f3f 55%, #06101f 100%)',
       }}
     >
-      {/* Neon atmosphere */}
       <div className="pointer-events-none absolute inset-0 overflow-hidden">
         <div
           className="overlay-glow absolute -left-24 top-0 h-72 w-72 rounded-full blur-3xl"
@@ -132,7 +148,7 @@ export default function ObsOverlay() {
         <div className="overlay-scanline absolute inset-x-0 h-24 bg-gradient-to-b from-cyan-400/10 to-transparent" />
       </div>
 
-      <div className="relative z-10 flex h-full min-h-0 w-full flex-col overflow-hidden rounded-lg border border-cyan-400/25 bg-slate-950/35 px-2 py-1.5 shadow-[0_0_40px_rgba(34,211,238,0.12)] backdrop-blur-[2px] sm:px-3 sm:py-2">
+      <div className="relative z-10 flex h-full min-h-0 w-full flex-col justify-between overflow-hidden rounded-lg border border-cyan-400/25 bg-slate-950/35 px-2 py-1.5 shadow-[0_0_40px_rgba(34,211,238,0.12)] backdrop-blur-[2px] sm:px-3 sm:py-2">
         <header className="flex w-full shrink-0 items-center justify-between border-b border-cyan-400/35 pb-1.5">
           <div className="min-w-0">
             <h1 className="font-display text-2xl font-black uppercase leading-none tracking-[0.18em] text-white drop-shadow-[0_0_16px_#22d3ee] sm:text-3xl md:text-4xl">
@@ -166,29 +182,46 @@ export default function ObsOverlay() {
         >
           {standings.map((team, idx) => {
             const animName = enterFrom === 'left' ? 'overlaySlideLeft' : 'overlaySlideRight';
+            const top = TOP3[team.rank];
+            const rowCls = top
+              ? top.row
+              : 'border-cyan-400/25 bg-gradient-to-r from-slate-950/80 via-blue-950/55 to-slate-950/70';
+
             return (
               <div
                 key={`${team.teamId || team.teamName}-${tick}`}
-                className="grid h-full min-h-0 w-full items-center gap-0.5 rounded-md border border-cyan-400/30 bg-gradient-to-r from-slate-950/80 via-blue-950/55 to-slate-950/70 px-1.5"
+                className={`grid h-full min-h-0 w-full items-center gap-0.5 rounded-md border px-1.5 ${rowCls}`}
                 style={{
                   gridTemplateColumns: gridCols,
                   animation: `${animName} 1.15s cubic-bezier(0.22, 1, 0.36, 1) both`,
                   animationDelay: `${idx * 0.09}s`,
-                  boxShadow: team.rank <= 3
-                    ? '0 0 18px rgba(34,211,238,0.28), inset 0 0 20px rgba(34,211,238,0.06)'
-                    : 'inset 0 0 12px rgba(15,23,42,0.5)',
+                  boxShadow: top ? top.glow : 'inset 0 0 12px rgba(15,23,42,0.5)',
                 }}
               >
-                <span className={`font-display text-lg font-black leading-none sm:text-xl ${
-                  team.rank <= 3 ? 'text-amber-300 drop-shadow-[0_0_8px_#f59e0b]' : 'text-white/90'
-                }`}>
-                  {team.rank}
-                </span>
+                <div className="flex items-center gap-0.5">
+                  {top ? (
+                    <span
+                      className="text-base leading-none sm:text-lg"
+                      style={{ filter: 'drop-shadow(0 0 6px rgba(251,191,36,0.55))' }}
+                      aria-label={`Rank ${team.rank}`}
+                    >
+                      {top.medal}
+                    </span>
+                  ) : (
+                    <span className="font-display text-lg font-black leading-none text-white/90 sm:text-xl">
+                      {team.rank}
+                    </span>
+                  )}
+                </div>
                 <p className="truncate font-display text-base font-bold uppercase leading-tight tracking-wide text-cyan-50 drop-shadow-[0_0_6px_rgba(34,211,238,0.35)] sm:text-lg md:text-xl">
                   {team.teamName}
                 </p>
                 <MatchScoreCells team={team} matchNumbers={matchNumbers} mode={mode} obs />
-                <span className="text-right font-mono text-lg font-black leading-none text-amber-300 drop-shadow-[0_0_10px_#f59e0b] sm:text-xl">
+                <span className={`text-right font-mono text-lg font-black leading-none sm:text-xl ${
+                  team.rank === 1
+                    ? 'text-yellow-300 font-extrabold drop-shadow-[0_0_12px_#facc15]'
+                    : 'text-amber-300 drop-shadow-[0_0_10px_#f59e0b]'
+                }`}>
                   {team.totalPoints}
                 </span>
               </div>

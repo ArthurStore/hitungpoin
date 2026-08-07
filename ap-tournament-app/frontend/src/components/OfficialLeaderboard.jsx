@@ -6,15 +6,18 @@ import InlineTeamName from './InlineTeamName';
 const RANK_STYLES = {
   1: {
     badge: 'bg-gradient-to-br from-yellow-300 via-amber-400 to-yellow-600 text-black',
-    row: 'from-amber-500/30 via-orange-600/40 to-red-900/50',
+    row: 'from-amber-500/30 via-yellow-500/15 to-transparent border border-amber-400/40',
+    medal: '🥇',
   },
   2: {
     badge: 'bg-gradient-to-br from-slate-200 via-slate-300 to-slate-500 text-black',
-    row: 'from-slate-400/20 via-slate-600/30 to-slate-900/50',
+    row: 'from-slate-300/25 via-slate-400/10 to-transparent border border-slate-300/35',
+    medal: '🥈',
   },
   3: {
     badge: 'bg-gradient-to-br from-amber-600 via-orange-700 to-amber-900 text-white',
-    row: 'from-amber-700/25 via-orange-800/35 to-slate-900/50',
+    row: 'from-amber-700/25 via-orange-600/10 to-transparent border border-amber-600/40',
+    medal: '🥉',
   },
 };
 
@@ -37,7 +40,7 @@ export default function OfficialLeaderboard({
   const logoUrl = resolveAssetUrl(tournament?.logo);
   const mode = tournament?.inputMode || 'cr_biasa';
   const rows = standings.slice(0, MAX_TEAMS);
-  const rowH = Math.floor(680 / Math.max(rows.length || 15, 15));
+  const n = Math.max(rows.length, 1);
   const matchCols = matchColumnCount(totalMatches, mode);
   const isLeague = mode === 'cr_league';
 
@@ -57,7 +60,7 @@ export default function OfficialLeaderboard({
           style={{ background: 'radial-gradient(ellipse at 50% 0%, #f59e0b 0%, transparent 70%)' }}
         />
 
-        <div className="relative z-10 px-4 pb-2 pt-5">
+        <div className="relative z-10 shrink-0 px-4 pb-2 pt-5">
           <div className="mb-3 flex items-center justify-between gap-2">
             <div className="flex h-14 w-14 shrink-0 items-center justify-center">
               {logoUrl ? (
@@ -100,9 +103,9 @@ export default function OfficialLeaderboard({
           </p>
         </div>
 
-        <div className="relative z-10 flex-1 overflow-hidden px-2 pb-2">
+        <div className="relative z-10 flex min-h-0 flex-1 flex-col overflow-hidden px-2 pb-2">
           <div
-            className="mb-1 grid items-end gap-x-0.5 px-0.5"
+            className="mb-1 grid shrink-0 items-end gap-x-0.5 px-0.5"
             style={{
               gridTemplateColumns: `28px minmax(0, 1.35fr) repeat(${matchCols}, minmax(0, 1fr)) 42px`,
             }}
@@ -113,7 +116,11 @@ export default function OfficialLeaderboard({
             <span className="pb-1 text-right text-[8px] font-bold text-slate-500">TOTAL</span>
           </div>
 
-          <div className="flex flex-col" style={{ gap: 2 }}>
+          {/* Auto-fit: 12 atau 15 baris mengisi tinggi penuh tanpa gap aneh */}
+          <div
+            className="grid min-h-0 w-full flex-1 gap-0.5"
+            style={{ gridTemplateRows: `repeat(${n}, minmax(0, 1fr))` }}
+          >
             {rows.length === 0 ? (
               <p className="py-16 text-center text-sm text-white/30">Belum ada data klasemen</p>
             ) : rows.map((team) => {
@@ -125,29 +132,36 @@ export default function OfficialLeaderboard({
               return (
                 <div
                   key={team.teamId || team.teamName}
-                  className={`grid items-center gap-x-0.5 rounded-sm bg-gradient-to-r px-0.5 ${rs.row}`}
+                  className={`grid h-full min-h-0 items-center gap-x-0.5 rounded-sm bg-gradient-to-r px-0.5 ${rs.row}`}
                   style={{
                     gridTemplateColumns: `28px minmax(0, 1.35fr) repeat(${matchCols}, minmax(0, 1fr)) 42px`,
-                    minHeight: Math.max(32, Math.min(46, rowH)),
-                    height: Math.max(32, Math.min(46, rowH)),
                   }}
                 >
-                  <div className={`flex h-6 w-6 items-center justify-center rounded text-[11px] font-black ${rs.badge}`}>
-                    {team.rank}
+                  <div
+                    className={`flex h-6 w-6 shrink-0 items-center justify-center rounded text-[11px] font-black ${rs.medal ? 'bg-transparent text-base leading-none' : rs.badge}`}
+                    style={rs.medal ? { filter: 'drop-shadow(0 0 4px rgba(251,191,36,0.45))' } : undefined}
+                    title={`#${team.rank}`}
+                  >
+                    {rs.medal || team.rank}
                   </div>
-                  <div className="min-w-0 truncate text-[12px] font-bold uppercase leading-tight tracking-wide text-white">
-                    {team.rank === 1 && <Fire size={11} weight="fill" className="mr-0.5 inline text-orange-300" />}
-                    {editable && onRenameTeam && team.teamId ? (
-                      <InlineTeamName
-                        name={team.teamName}
-                        onSave={(next) => onRenameTeam(team, next)}
-                        className="max-w-full text-[12px] font-bold uppercase text-white hover:text-cyan-200"
-                        inputClassName="w-full rounded border border-amber-400/50 bg-black/60 px-1 py-0 text-[11px] font-bold uppercase text-white outline-none"
-                        showIcon
-                      />
-                    ) : (
-                      <span title={team.teamName}>{team.teamName}</span>
+                  {/* min-w-0 flex — JANGAN truncate di parent (bug Rank #1 → "…") */}
+                  <div className="flex min-w-0 items-center gap-0.5 text-[12px] font-bold uppercase leading-tight tracking-wide text-white">
+                    {team.rank === 1 && (
+                      <Fire size={12} weight="fill" className="shrink-0 text-orange-300" />
                     )}
+                    <div className="min-w-0 flex-1">
+                      {editable && onRenameTeam && team.teamId ? (
+                        <InlineTeamName
+                          name={team.teamName}
+                          onSave={(next) => onRenameTeam(team, next)}
+                          className="text-[12px] font-bold uppercase text-white hover:text-cyan-200"
+                          inputClassName="w-full min-w-0 rounded border border-amber-400/60 bg-black/70 px-1 py-0.5 text-[11px] font-bold uppercase text-white outline-none"
+                          showIcon
+                        />
+                      ) : (
+                        <span className="block truncate" title={team.teamName}>{team.teamName}</span>
+                      )}
+                    </div>
                   </div>
                   <MatchScoreCells
                     team={team}
@@ -157,7 +171,9 @@ export default function OfficialLeaderboard({
                     onEdit={onEditMatchScore}
                     compact
                   />
-                  <span className="text-right font-mono text-[14px] font-black text-amber-400">
+                  <span className={`text-right font-mono text-[14px] font-black ${
+                    team.rank === 1 ? 'text-yellow-300' : 'text-amber-400'
+                  }`}>
                     {team.totalPoints}
                   </span>
                 </div>
@@ -166,7 +182,7 @@ export default function OfficialLeaderboard({
           </div>
         </div>
 
-        <div className="relative z-10 border-t border-white/5 px-4 py-2 text-center">
+        <div className="relative z-10 shrink-0 border-t border-white/5 px-4 py-2 text-center">
           <p className="font-display text-[11px] font-bold uppercase tracking-[0.35em] text-emerald/70">
             AP · Arthur Points
           </p>

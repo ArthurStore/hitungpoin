@@ -245,6 +245,15 @@ export async function upsertTeam(req, res) {
         const t = memoryStore.getTournament(id);
         memoryStore.updateTournament(id, { teams: [...(t.teams || []), team._id] });
       }
+      // Sync nama di hasil match + live broadcast
+      const matches = memoryStore.getMatches(id);
+      matches.forEach((m) => {
+        const results = (m.results || []).map((r) =>
+          String(r.teamId) === String(team._id) ? { ...r, teamName } : r
+        );
+        memoryStore.updateMatch(m._id, { results });
+      });
+      await broadcastStandings(id);
       return res.json(team);
     }
 
@@ -277,6 +286,22 @@ export async function upsertTeam(req, res) {
       });
       await Tournament.findByIdAndUpdate(id, { $addToSet: { teams: team._id } });
     }
+
+    const matches = await Match.find({ tournamentId: id });
+    await Promise.all(matches.map(async (m) => {
+      let changed = false;
+      (m.results || []).forEach((r) => {
+        if (String(r.teamId) === String(team._id) && r.teamName !== teamName) {
+          r.teamName = teamName;
+          changed = true;
+        }
+      });
+      if (changed) {
+        m.markModified('results');
+        await m.save();
+      }
+    }));
+    await broadcastStandings(id);
     res.json(team);
   } catch (err) {
     res.status(500).json({ error: err.message });
