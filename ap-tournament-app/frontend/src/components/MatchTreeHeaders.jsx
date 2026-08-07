@@ -60,14 +60,19 @@ export function MatchScoreCells({
   editable = false,
   onEdit,
   compact = false,
+  obs = false,
 }) {
   const isLeague = mode === 'cr_league';
-  const ptsCls = compact
-    ? 'text-center font-mono text-[11px] font-bold text-emerald-300'
-    : 'text-center font-mono text-sm font-bold text-emerald-300';
-  const killCls = compact
-    ? 'text-center font-mono text-[10px] font-semibold text-cyan-200/90'
-    : 'text-center font-mono text-sm text-cyan-200';
+  const ptsCls = obs
+    ? 'text-center font-mono text-base font-bold text-emerald-300 md:text-lg'
+    : compact
+      ? 'text-center font-mono text-[11px] font-bold text-emerald-300'
+      : 'text-center font-mono text-sm font-bold text-emerald-300';
+  const killCls = obs
+    ? 'text-center font-mono text-sm font-semibold text-cyan-200 md:text-base'
+    : compact
+      ? 'text-center font-mono text-[10px] font-semibold text-cyan-200/90'
+      : 'text-center font-mono text-sm text-cyan-200';
 
   return matchNumbers.map((n) => {
     const bd = team.matchBreakdown?.[n];

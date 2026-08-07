@@ -2,11 +2,14 @@ import { useState } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import { api } from '../../utils/api';
 import Button from '../../components/Button';
+import Toast from '../../components/Toast';
+import InlineTeamName from '../../components/InlineTeamName';
 
 export default function TeamsTab() {
   const { tournament, refresh } = useOutletContext();
   const [rosterText, setRosterText] = useState('');
   const [saving, setSaving] = useState(false);
+  const [toast, setToast] = useState({ message: '', type: 'info' });
 
   const teams = tournament?.teams || [];
 
@@ -15,18 +18,29 @@ export default function TeamsTab() {
     try {
       await api.updateTeams(tournament._id, { rosterText });
       await refresh();
+      setToast({ message: 'Roster tersimpan', type: 'success' });
+    } catch (err) {
+      setToast({ message: err.message, type: 'error' });
     } finally {
       setSaving(false);
     }
   };
 
+  const handleRename = async (team, nextName) => {
+    await api.renameTeam(tournament._id, team._id, nextName);
+    await refresh();
+    setToast({ message: `Nama tim diubah → ${nextName}`, type: 'success' });
+  };
+
   return (
     <div className="space-y-6">
+      <Toast message={toast.message} type={toast.type} onClose={() => setToast({ message: '', type: 'info' })} />
+
       <div className="glass-panel rounded-2xl p-6">
         <h2 className="mb-2 font-bold text-white">Teams & Roster</h2>
         <p className="mb-4 text-xs text-slate-500">
           Format: Team Name | Nick1 // Nick2 // Nick3 // Nick4 // Nick5 // Nick6
-          (maks. 6 nickname — termasuk cadangan). Roster juga ter-sync otomatis dari OCR Match.
+          (maks. 6 nickname — termasuk cadangan). Klik nama tim di daftar bawah untuk edit inline.
         </p>
         <textarea
           value={rosterText}
@@ -46,7 +60,12 @@ export default function TeamsTab() {
               const nicks = (t.players || []).map((p) => p.nickname || p).filter(Boolean);
               return (
                 <div key={t._id} className="rounded-xl bg-slate-800/40 px-4 py-3">
-                  <p className="font-semibold text-white">{t.name}</p>
+                  <InlineTeamName
+                    name={t.name}
+                    onSave={(next) => handleRename(t, next)}
+                    className="text-base font-semibold text-white hover:text-cyan-300"
+                    inputClassName="w-full rounded-lg border border-emerald/40 bg-slate-900 px-2 py-1 text-sm font-semibold uppercase text-white outline-none"
+                  />
                   {nicks.length > 0 ? (
                     <div className="mt-1.5 flex flex-wrap gap-1">
                       {nicks.map((n, i) => (
@@ -62,7 +81,7 @@ export default function TeamsTab() {
                       ))}
                     </div>
                   ) : (
-                    <p className="text-xs text-slate-500">
+                    <p className="mt-1 text-xs text-slate-500">
                       Rep: {t.representative || '-'}
                     </p>
                   )}

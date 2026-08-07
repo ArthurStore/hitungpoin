@@ -69,10 +69,11 @@ export default function ObsOverlay() {
     });
 
     const poll = setInterval(load, 20000);
+    // Slower dramatic cycle
     const anim = setInterval(() => {
       setEnterFrom((f) => (f === 'left' ? 'right' : 'left'));
       setTick((t) => t + 1);
-    }, 14000);
+    }, 18000);
 
     return () => {
       alive = false;
@@ -92,50 +93,75 @@ export default function ObsOverlay() {
   const matchNumbers = Array.from({ length: totalMatches }, (_, i) => i + 1);
   const matchCols = matchColumnCount(totalMatches, mode);
   const n = Math.max(standings.length, 1);
-  // Always dense enough for 15 rows on 1080p
-  const gridCols = `28px minmax(0,1.4fr) repeat(${matchCols}, minmax(0,1fr)) 44px`;
+  const gridCols = `36px minmax(0,1.45fr) repeat(${matchCols}, minmax(0,1fr)) 56px`;
 
   if (!tournament) {
     return (
-      <div className="flex h-screen w-screen items-center justify-center overflow-hidden bg-transparent text-white/70">
+      <div className="flex h-screen w-screen items-center justify-center overflow-hidden text-cyan-200/80"
+        style={{ background: 'linear-gradient(160deg, #020617 0%, #0c1a3a 45%, #0a1628 100%)' }}
+      >
         Loading overlay…
       </div>
     );
   }
 
   return (
-    <div className="obs-overlay-root relative flex h-screen w-screen max-h-screen flex-col justify-between overflow-hidden bg-transparent p-2 text-white">
-      <div className="relative z-10 flex h-full min-h-0 w-full flex-col overflow-hidden">
-        <header className="flex w-full shrink-0 items-center justify-between border-b border-cyan-400/30 pb-1">
+    <div
+      className="obs-overlay-root relative flex h-screen w-screen max-h-screen flex-col overflow-hidden p-1.5 text-white sm:p-2"
+      style={{
+        background: 'linear-gradient(165deg, #020617 0%, #071428 28%, #0b1f3f 55%, #06101f 100%)',
+      }}
+    >
+      {/* Neon atmosphere */}
+      <div className="pointer-events-none absolute inset-0 overflow-hidden">
+        <div
+          className="overlay-glow absolute -left-24 top-0 h-72 w-72 rounded-full blur-3xl"
+          style={{ background: 'radial-gradient(circle, rgba(34,211,238,0.28), transparent 70%)' }}
+        />
+        <div
+          className="overlay-glow absolute -right-16 bottom-0 h-80 w-80 rounded-full blur-3xl"
+          style={{ background: 'radial-gradient(circle, rgba(59,130,246,0.22), transparent 70%)', animationDelay: '1.2s' }}
+        />
+        <div
+          className="absolute inset-0 opacity-30"
+          style={{
+            backgroundImage: 'linear-gradient(rgba(34,211,238,0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(34,211,238,0.04) 1px, transparent 1px)',
+            backgroundSize: '48px 48px',
+          }}
+        />
+        <div className="overlay-scanline absolute inset-x-0 h-24 bg-gradient-to-b from-cyan-400/10 to-transparent" />
+      </div>
+
+      <div className="relative z-10 flex h-full min-h-0 w-full flex-col overflow-hidden rounded-lg border border-cyan-400/25 bg-slate-950/35 px-2 py-1.5 shadow-[0_0_40px_rgba(34,211,238,0.12)] backdrop-blur-[2px] sm:px-3 sm:py-2">
+        <header className="flex w-full shrink-0 items-center justify-between border-b border-cyan-400/35 pb-1.5">
           <div className="min-w-0">
-            <h1 className="font-display text-lg font-black uppercase leading-none tracking-[0.16em] text-white drop-shadow-[0_0_10px_#22d3ee] sm:text-xl md:text-2xl">
+            <h1 className="font-display text-2xl font-black uppercase leading-none tracking-[0.18em] text-white drop-shadow-[0_0_16px_#22d3ee] sm:text-3xl md:text-4xl">
               LIVE SCORE
             </h1>
-            <p className="mt-0.5 truncate text-[9px] uppercase tracking-[0.22em] text-fuchsia-300/80 sm:text-[10px]">
+            <p className="mt-1 truncate text-[11px] uppercase tracking-[0.28em] text-cyan-300/90 sm:text-xs">
               {tournament.name}
             </p>
           </div>
-          <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-bold ${
-            connected ? 'bg-emerald/20 text-emerald' : 'bg-white/10 text-white/50'
+          <span className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-bold ${
+            connected ? 'bg-emerald/25 text-emerald shadow-[0_0_12px_rgba(16,185,129,0.35)]' : 'bg-white/10 text-white/50'
           }`}>
-            <span className={`h-1.5 w-1.5 rounded-full ${connected ? 'bg-emerald animate-pulse' : 'bg-white/40'}`} />
+            <span className={`h-2 w-2 rounded-full ${connected ? 'bg-emerald animate-pulse' : 'bg-white/40'}`} />
             {connected ? 'LIVE' : 'POLL'}
           </span>
         </header>
 
         <div
-          className="mt-1 grid w-full shrink-0 items-end gap-0 px-0.5"
+          className="mt-1.5 grid w-full shrink-0 items-end gap-0"
           style={{ gridTemplateColumns: gridCols }}
         >
-          <span className="pb-0.5 text-[8px] font-bold text-cyan-200/60">#</span>
-          <span className="pb-0.5 text-[8px] font-bold uppercase text-cyan-200/60">Team</span>
-          <MatchTreeHeaders matchNumbers={matchNumbers} mode={mode} compact />
-          <span className="pb-0.5 text-right text-[8px] font-bold text-cyan-200/60">TOTAL</span>
+          <span className="pb-0.5 text-[10px] font-bold text-cyan-200/70">#</span>
+          <span className="pb-0.5 text-[10px] font-bold uppercase text-cyan-200/70">Team</span>
+          <MatchTreeHeaders matchNumbers={matchNumbers} mode={mode} />
+          <span className="pb-0.5 text-right text-[10px] font-bold text-cyan-200/70">TOTAL</span>
         </div>
 
-        {/* Equal-height rows fill remaining viewport — fits 15 on 1080p */}
         <div
-          className="mt-0.5 grid min-h-0 w-full flex-1 gap-0.5 overflow-hidden"
+          className="mt-1 grid min-h-0 w-full flex-1 gap-1 overflow-hidden"
           style={{ gridTemplateRows: `repeat(${n}, minmax(0, 1fr))` }}
         >
           {standings.map((team, idx) => {
@@ -143,24 +169,26 @@ export default function ObsOverlay() {
             return (
               <div
                 key={`${team.teamId || team.teamName}-${tick}`}
-                className="grid h-full min-h-0 w-full items-center gap-0 rounded border border-cyan-400/20 bg-black/55 px-1"
+                className="grid h-full min-h-0 w-full items-center gap-0.5 rounded-md border border-cyan-400/30 bg-gradient-to-r from-slate-950/80 via-blue-950/55 to-slate-950/70 px-1.5"
                 style={{
                   gridTemplateColumns: gridCols,
-                  animation: `${animName} 0.4s ease-out both`,
-                  animationDelay: `${Math.min(idx, 8) * 0.03}s`,
-                  boxShadow: team.rank <= 3 ? '0 0 8px rgba(34,211,238,0.16)' : 'none',
+                  animation: `${animName} 1.15s cubic-bezier(0.22, 1, 0.36, 1) both`,
+                  animationDelay: `${idx * 0.09}s`,
+                  boxShadow: team.rank <= 3
+                    ? '0 0 18px rgba(34,211,238,0.28), inset 0 0 20px rgba(34,211,238,0.06)'
+                    : 'inset 0 0 12px rgba(15,23,42,0.5)',
                 }}
               >
-                <span className={`font-display text-xs font-black leading-none sm:text-sm ${
-                  team.rank <= 3 ? 'text-amber-300' : 'text-white/85'
+                <span className={`font-display text-lg font-black leading-none sm:text-xl ${
+                  team.rank <= 3 ? 'text-amber-300 drop-shadow-[0_0_8px_#f59e0b]' : 'text-white/90'
                 }`}>
                   {team.rank}
                 </span>
-                <p className="truncate font-display text-xs font-bold uppercase leading-none tracking-wide text-cyan-100 sm:text-sm">
+                <p className="truncate font-display text-base font-bold uppercase leading-tight tracking-wide text-cyan-50 drop-shadow-[0_0_6px_rgba(34,211,238,0.35)] sm:text-lg md:text-xl">
                   {team.teamName}
                 </p>
-                <MatchScoreCells team={team} matchNumbers={matchNumbers} mode={mode} compact />
-                <span className="text-right font-mono text-xs font-black leading-none text-amber-300 sm:text-sm">
+                <MatchScoreCells team={team} matchNumbers={matchNumbers} mode={mode} obs />
+                <span className="text-right font-mono text-lg font-black leading-none text-amber-300 drop-shadow-[0_0_10px_#f59e0b] sm:text-xl">
                   {team.totalPoints}
                 </span>
               </div>

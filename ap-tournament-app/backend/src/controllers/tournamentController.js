@@ -283,6 +283,58 @@ export async function upsertTeam(req, res) {
   }
 }
 
+/** Rename team + sync teamName in all match results + broadcast live */
+export async function renameTeam(req, res) {
+  try {
+    const { id, teamId } = req.params;
+    const teamName = String(req.body?.name || '').trim();
+    if (!teamName) return res.status(400).json({ error: 'Nama tim wajib diisi' });
+
+    if (isMemoryStore()) {
+      const team = memoryStore.updateTeam(teamId, { name: teamName });
+      if (!team || team.tournamentId !== id) return res.status(404).json({ error: 'Tim tidak ditemukan' });
+
+      const matches = memoryStore.getMatches(id);
+      matches.forEach((m) => {
+        const results = (m.results || []).map((r) =>
+          String(r.teamId) === String(teamId) ? { ...r, teamName } : r
+        );
+        memoryStore.updateMatch(m._id, { results });
+      });
+
+      await broadcastStandings(id);
+      return res.json(team);
+    }
+
+    const team = await Team.findOneAndUpdate(
+      { _id: teamId, tournamentId: id },
+      { name: teamName },
+      { new: true }
+    );
+    if (!team) return res.status(404).json({ error: 'Tim tidak ditemukan' });
+
+    const matches = await Match.find({ tournamentId: id });
+    await Promise.all(matches.map(async (m) => {
+      let changed = false;
+      (m.results || []).forEach((r) => {
+        if (String(r.teamId) === String(teamId) && r.teamName !== teamName) {
+          r.teamName = teamName;
+          changed = true;
+        }
+      });
+      if (changed) {
+        m.markModified('results');
+        await m.save();
+      }
+    }));
+
+    await broadcastStandings(id);
+    res.json(team);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+}
+
 export async function getLeaderboard(req, res) {
   try {
     const { id } = req.params;

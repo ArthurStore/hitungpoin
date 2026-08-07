@@ -122,13 +122,13 @@ body.obs-overlay-page #root {
 }
 
 @keyframes overlaySlideLeft {
-  from { opacity: 0; transform: translateX(-48px); }
-  to { opacity: 1; transform: translateX(0); }
+  from { opacity: 0; transform: translateX(-64px); filter: blur(2px); }
+  to { opacity: 1; transform: translateX(0); filter: blur(0); }
 }
 
 @keyframes overlaySlideRight {
-  from { opacity: 0; transform: translateX(48px); }
-  to { opacity: 1; transform: translateX(0); }
+  from { opacity: 0; transform: translateX(64px); filter: blur(2px); }
+  to { opacity: 1; transform: translateX(0); filter: blur(0); }
 }
 
 .overlay-scanline {

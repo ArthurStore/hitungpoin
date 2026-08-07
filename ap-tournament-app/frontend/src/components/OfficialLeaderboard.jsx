@@ -1,6 +1,7 @@
 import { Fire } from '@phosphor-icons/react';
 import { resolveAssetUrl } from '../utils/api';
 import { MatchTreeHeaders, MatchScoreCells, matchColumnCount } from './MatchTreeHeaders';
+import InlineTeamName from './InlineTeamName';
 
 const RANK_STYLES = {
   1: {
@@ -28,6 +29,7 @@ export default function OfficialLeaderboard({
   boardRef,
   editable = false,
   onEditMatchScore,
+  onRenameTeam,
 }) {
   const totalMatches = tournament?.totalMatches || matches.length || 6;
   const matchNumbers = Array.from({ length: totalMatches }, (_, i) => i + 1);
@@ -133,10 +135,20 @@ export default function OfficialLeaderboard({
                   <div className={`flex h-6 w-6 items-center justify-center rounded text-[11px] font-black ${rs.badge}`}>
                     {team.rank}
                   </div>
-                  <p className="truncate text-[12px] font-bold uppercase leading-tight tracking-wide text-white" title={team.teamName}>
+                  <div className="min-w-0 truncate text-[12px] font-bold uppercase leading-tight tracking-wide text-white">
                     {team.rank === 1 && <Fire size={11} weight="fill" className="mr-0.5 inline text-orange-300" />}
-                    {team.teamName}
-                  </p>
+                    {editable && onRenameTeam && team.teamId ? (
+                      <InlineTeamName
+                        name={team.teamName}
+                        onSave={(next) => onRenameTeam(team, next)}
+                        className="max-w-full text-[12px] font-bold uppercase text-white hover:text-cyan-200"
+                        inputClassName="w-full rounded border border-amber-400/50 bg-black/60 px-1 py-0 text-[11px] font-bold uppercase text-white outline-none"
+                        showIcon
+                      />
+                    ) : (
+                      <span title={team.teamName}>{team.teamName}</span>
+                    )}
+                  </div>
                   <MatchScoreCells
                     team={team}
                     matchNumbers={matchNumbers}

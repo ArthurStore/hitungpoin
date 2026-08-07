@@ -1,209 +1,302 @@
 # AP (Arthur Points)
 
-Platform otomatis manajemen turnamen & scoring Free Fire Esports.
-
-## Features
-
-- **Tournament Hub** - Setup, Teams, Input Match, Leaderboard, Certificate per turnamen
-- **Dual OCR Mode** - CR Biasa (full scoreboard) & CR League (Ranklist Langsung Jeder)
-- **Real-time Scan Logs** - Progress bar, terminal logs, 15s timeout, manual fallback
-- **Auth** - Register/Login organizer dengan isolasi turnamen per user
-- **Public Live** - `/live/:tournamentId` read-only standings
-- **Super Admin** - `/admin` dengan PIN `1234`
+Platform otomatis manajemen turnamen & scoring Free Fire Esports — OCR Gemini Vision, leaderboard live, OBS overlay 16:9, sertifikat, dan admin panel.
 
 ---
 
-## Project Structure
+## Fitur Utama
+
+- **Tournament Hub** — Setup, Teams (inline rename), Input Match OCR, Leaderboard, Certificate
+- **Dual OCR Mode** — CR Biasa (scoreboard + 4 nick) & CR League (Nama Tim + Score, auto-create tim)
+- **Smart Roster Memory** — Auto-match nick/nama tim antar match; roster hingga 6 player
+- **Live OBS Overlay** — `/overlay/:slug` fullscreen 16:9, tema blue neon, Socket.io realtime
+- **Inline Edit** — Edit skor match & rename nama tim langsung di Leaderboard / Teams
+- **Auth Organizer** — Isolasi turnamen per user + Super Admin PIN
+
+---
+
+## Struktur Proyek
 
 ```
 ap-tournament-app/
-├── backend/          # Express API (port 5001)
-├── frontend/         # React + Vite (port 5174)
-├── ecosystem.config.js
+├── backend/                 # Express API (default port 5001)
+│   ├── .env.example
+│   ├── data/settings.json   # Persistensi Gemini keys (auto)
+│   └── src/
+├── frontend/                # React + Vite (default port 5174)
+│   ├── .env.example
+│   └── .env.production.example
+├── ecosystem.config.js      # PM2
+├── docker-compose.yml
 ├── Dockerfile.backend
 ├── Dockerfile.frontend
-├── docker-compose.yml
 └── nginx.conf
 ```
 
 ---
 
-## 1. Run Locally (Development)
+## Step 1 — Clone & Environment Variables
 
-### Backend
+```bash
+git clone <URL_REPO> hitung-poin
+cd hitung-poin/ap-tournament-app
+```
+
+### Backend `.env`
 
 ```bash
 cd backend
 cp .env.example .env
-npm install
-npm run dev
 ```
 
-API: `http://localhost:5001/api/health`
+Isi minimal:
 
-### Frontend
+```env
+PORT=5001
+HOST=0.0.0.0
+JWT_SECRET=ganti-dengan-secret-panjang
+ADMIN_PIN=1234
+NODE_ENV=production
+CORS_ORIGINS=http://localhost:5174,https://domain-anda.com
+
+# Opsional MongoDB (tanpa ini = in-memory store)
+# MONGODB_URI=mongodb://localhost:27017/ap_tournament
+
+# Gemini (bisa juga diisi lewat Admin Dashboard)
+GEMINI_API_KEY=
+GEMINI_API_KEY_1=
+GEMINI_API_KEY_2=
+GEMINI_API_KEY_3=
+```
+
+### Frontend `.env` (dev)
 
 ```bash
 cd frontend
 cp .env.example .env
-npm install
-npm run dev
 ```
 
-App: `http://localhost:5174`
+Local: biarkan `VITE_API_BASE_URL` kosong (Vite proxy `/api` → `localhost:5001`).
 
-Local dev uses Vite proxy (`/api` -> `localhost:5001`). No `VITE_API_BASE_URL` needed.
+### Frontend production
 
-**Demo login:** `demo@ap.local` / `demo1234`
+```bash
+cp .env.production.example .env.production
+# VITE_API_BASE_URL=https://api.domain-anda.com/api
+# atau http://IP_VPS:5001/api
+```
 
 ---
 
-## 2. Run on VPS with PM2
+## Step 2 — Konfigurasi GEMINI_API_KEY (Multi-Key)
 
-### Step 1: Build frontend with VPS API URL
+Sistem mendukung **3 slot API key** dengan Round-Robin + fallback quota.
+
+| Metode | Cara |
+|--------|------|
+| **Admin Dashboard** | Login → `/admin` → verifikasi PIN → isi Key 1–3 → Save. Key ditulis ke `backend/data/settings.json` **dan** `backend/.env` (survive `pm2 restart`). |
+| **File `.env`** | Set `GEMINI_API_KEY` (primary) dan/atau `GEMINI_API_KEY_1..3`. Saat server start, key di-hydrate ke settings. |
+| **settings.json** | Fallback persisten di `backend/data/settings.json`. |
+
+Setelah ubah key via Admin, tidak wajib edit `.env` manual — backend sudah sync keduanya.
+
+Test koneksi: tombol **Test Gemini** di Admin Panel.
+
+---
+
+## Step 3 — Admin Security (PIN & Credentials)
+
+| Item | Default / Keterangan |
+|------|----------------------|
+| **Admin PIN** | `ADMIN_PIN` di `.env` (default contoh: `1234`) — **wajib diganti di production** |
+| **Demo Organizer** | Email `demo@ap.local` / password `demo1234` (seed in-memory) |
+| **JWT** | `JWT_SECRET` harus unik & kuat di VPS |
+
+Akses Super Admin: buka `/admin`, masukkan PIN → kelola Gemini keys, analytics, cleanup.
+
+---
+
+## Step 4 — Deploy VPS Ubuntu (Node.js + PM2 / Docker)
+
+### Opsi A — PM2 (disarankan sederhana)
 
 ```bash
-cd frontend
+# Node 20+
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt-get install -y nodejs
+sudo npm install -g pm2
+
+# Backend
+cd /path/to/ap-tournament-app/backend
+cp .env.example .env   # edit nilai production
+npm install --omit=dev
+
+# Frontend build
+cd ../frontend
 cp .env.production.example .env.production
-# Edit .env.production - set your VPS IP:
-# VITE_API_BASE_URL=http://YOUR_VPS_IP:5001/api
+# set VITE_API_BASE_URL
 npm install
 npm run build
-```
 
-### Step 2: Configure backend
-
-```bash
-cd backend
-cp .env.example .env
-# Edit .env:
-# HOST=0.0.0.0
-# PORT=5001
-# CORS_ORIGINS=http://YOUR_VPS_IP:5174
-npm install --omit=dev
-```
-
-### Step 3: Start with PM2
-
-From project root:
-
-```bash
-npm install -g pm2
+# Start dari root project
+cd ..
 pm2 start ecosystem.config.js --env production
 pm2 save
 pm2 startup
 ```
 
-### PM2 Commands
+Firewall:
+
+```bash
+sudo ufw allow 22/tcp
+sudo ufw allow 5001/tcp
+sudo ufw allow 5174/tcp
+# jika pakai Nginx:
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+sudo ufw enable
+```
+
+### Opsi B — Docker Compose
+
+```bash
+cd ap-tournament-app
+# Sesuaikan env di docker-compose / .env
+docker compose up -d --build
+```
+
+- Frontend + Nginx proxy: biasanya port `80` / `5174`
+- Backend: `5001`
+- Profile Mongo (opsional): lihat `docker-compose.yml`
+
+```bash
+docker compose down
+docker compose logs -f
+```
+
+---
+
+## Step 5 — Nginx Reverse Proxy & HTTPS
+
+Contoh server block (domain `poin.example.com` → frontend, `/api` → backend):
+
+```nginx
+server {
+    listen 80;
+    server_name poin.example.com;
+
+    location / {
+        proxy_pass http://127.0.0.1:5174;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+
+    location /api/ {
+        proxy_pass http://127.0.0.1:5001/api/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        client_max_body_size 50M;
+    }
+
+    location /socket.io/ {
+        proxy_pass http://127.0.0.1:5001/socket.io/;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+    }
+}
+```
+
+### SSL dengan Certbot
+
+```bash
+sudo apt install certbot python3-certbot-nginx
+sudo certbot --nginx -d poin.example.com
+```
+
+### Cloudflare
+
+1. DNS A record → IP VPS (Proxy orange cloud opsional)
+2. SSL/TLS mode: **Full** (dengan Certbot) atau **Flexible** (hanya Cloudflare↔visitor)
+3. Set `CORS_ORIGINS=https://poin.example.com`
+4. Rebuild frontend dengan `VITE_API_BASE_URL=https://poin.example.com/api` (jika API same-origin via Nginx)
+
+---
+
+## Step 6 — Menjalankan & Restart Service
+
+### PM2
 
 ```bash
 pm2 status
 pm2 logs ap-backend
 pm2 logs ap-frontend
+pm2 restart ap-backend
 pm2 restart all
 pm2 stop all
+pm2 save
 ```
+
+Setelah update kode:
+
+```bash
+cd frontend && npm run build
+cd ../backend && npm install --omit=dev
+pm2 restart all
+```
+
+### Docker
+
+```bash
+docker compose up -d --build
+docker compose restart
+docker compose logs -f backend
+```
+
+### Dev lokal
+
+```bash
+# Terminal 1
+cd backend && npm install && npm run dev
+
+# Terminal 2
+cd frontend && npm install && npm run dev
+```
+
+- App: `http://localhost:5174`
+- API health: `http://localhost:5001/api/health`
+- OBS Overlay: `http://localhost:5174/overlay/<tournamentId-atau-slug>`
+- Admin: `http://localhost:5174/admin`
 
 ---
 
-## 3. Run with Docker
+## OBS Browser Source
 
-```bash
-# From project root
-docker-compose up -d --build
-```
-
-- Frontend: `http://localhost:5174` (NGINX proxies `/api` to backend)
-- Backend: `http://localhost:5001`
-
-With MongoDB:
-
-```bash
-MONGODB_URI=mongodb://mongodb:27017/ap_tournament docker-compose --profile mongo up -d --build
-```
-
-Stop:
-
-```bash
-docker-compose down
-```
-
----
-
-## 4. Environment Variables
-
-### Frontend (`frontend/.env.production`)
-
-| Variable | Local | VPS |
-|----------|-------|-----|
-| `VITE_API_BASE_URL` | (empty, uses `/api` proxy) | `http://YOUR_IP:5001/api` |
-
-### Backend (`backend/.env`)
-
-| Variable | Description |
-|----------|-------------|
-| `PORT` | API port (default: 5001) |
-| `HOST` | Bind address (use `0.0.0.0` on VPS) |
-| `CORS_ORIGINS` | Comma-separated allowed origins |
-| `JWT_SECRET` | JWT signing secret |
-| `ADMIN_PIN` | Super admin PIN (default: 1234) |
-| `MONGODB_URI` | Optional MongoDB URI (falls back to in-memory) |
-
----
-
-## 5. Firewall & Port Setup
-
-### UFW (Ubuntu VPS)
-
-```bash
-sudo ufw allow 22/tcp      # SSH
-sudo ufw allow 5001/tcp    # Backend API
-sudo ufw allow 5174/tcp    # Frontend
-sudo ufw enable
-sudo ufw status
-```
-
-### Cloud Provider Security Groups
-
-Open inbound rules for your VPS:
-
-| Port | Protocol | Purpose |
-|------|----------|---------|
-| 5001 | TCP | Backend API |
-| 5174 | TCP | Frontend UI |
-| 80 | TCP | Optional (Docker NGINX) |
-| 443 | TCP | Optional (HTTPS with reverse proxy) |
-
-### Verify connectivity
-
-```bash
-curl http://YOUR_VPS_IP:5001/api/health
-curl http://YOUR_VPS_IP:5174
-```
+1. Buat sumber **Browser** di OBS
+2. URL: `http(s)://HOST/overlay/<tournamentId>` atau slug nama turnamen
+3. Width **1920** × Height **1080**
+4. Centang *Shutdown source when not visible* (opsional)
+5. Refresh cache setelah deploy frontend baru
 
 ---
 
 ## Troubleshooting
 
-### "Save Setup" button stuck / no response
-
-1. Check browser DevTools Network tab - API calls should go to port **5001**, not 5174
-2. Set `VITE_API_BASE_URL=http://YOUR_VPS_IP:5001/api` and rebuild frontend
-3. Ensure backend `CORS_ORIGINS` includes your frontend URL
-4. Ensure backend listens on `0.0.0.0` not `127.0.0.1`
-
-### CORS errors
-
-Add frontend URL to backend `.env`:
-
-```
-CORS_ORIGINS=http://43.157.205.127:5174,http://localhost:5174
-```
-
-Restart backend after changes.
+| Gejala | Perbaikan |
+|--------|-----------|
+| OCR gagal / key hilang setelah PM2 restart | Isi key di Admin → Save (tulis `.env` + `settings.json`), lalu `pm2 restart ap-backend` |
+| CORS error | Tambahkan origin frontend ke `CORS_ORIGINS`, restart backend |
+| Frontend hit API salah port | Set `VITE_API_BASE_URL` lalu **rebuild** frontend |
+| Overlay terpotong | Pastikan Browser Source 1920×1080; hard refresh URL overlay |
+| Socket tidak live | Proxy `/socket.io/` dengan Upgrade headers (lihat Nginx di atas) |
 
 ---
 
 ## Tech Stack
 
-React 19 + Vite + Tailwind v4 | Express + JWT + bcrypt | Tesseract.js | html2canvas | Recharts | PM2 | Docker + NGINX
+React 19 · Vite · Tailwind CSS v4 · Express · Socket.io · Gemini Vision OCR · JWT · PM2 · Docker · Nginx

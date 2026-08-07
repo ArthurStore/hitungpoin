@@ -44,6 +44,14 @@ export default function LeaderboardTab() {
     }
   };
 
+  const handleRenameTeam = async (team, nextName) => {
+    if (!team?.teamId) throw new Error('Team ID missing');
+    await api.renameTeam(tournament._id, team.teamId, nextName);
+    await reload();
+    await refresh?.();
+    setToast({ message: `Nama tim diubah → ${nextName}`, type: 'success' });
+  };
+
   const openEdit = (team, matchNo) => {
     const match = matches.find((m) => m.matchNumber === matchNo);
     const result = (match?.results || []).find(
@@ -195,6 +203,7 @@ export default function LeaderboardTab() {
         matches={matches}
         editable
         onEditMatchScore={openEdit}
+        onRenameTeam={handleRenameTeam}
       />
 
       {/* Editable table mirror for desktop clarity */}

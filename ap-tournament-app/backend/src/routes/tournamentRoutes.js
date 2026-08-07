@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import {
   listMyTournaments, getTournament, createTournament, updateTournament,
-  updateTeams, upsertTeam, getLeaderboard, submitMatchResults, deleteTournament, recordOcrScan,
+  updateTeams, upsertTeam, renameTeam, getLeaderboard, submitMatchResults, deleteTournament, recordOcrScan,
 } from '../controllers/tournamentController.js';
 import { authMiddleware, tournamentOwnerMiddleware } from '../middleware/auth.js';
 
@@ -16,6 +16,7 @@ router.put('/:id', tournamentOwnerMiddleware, updateTournament);
 router.delete('/:id', tournamentOwnerMiddleware, deleteTournament);
 router.put('/:id/teams', tournamentOwnerMiddleware, updateTeams);
 router.post('/:id/teams/upsert', tournamentOwnerMiddleware, upsertTeam);
+router.patch('/:id/teams/:teamId', tournamentOwnerMiddleware, renameTeam);
 router.get('/:id/leaderboard', tournamentOwnerMiddleware, getLeaderboard);
 router.post('/:id/matches/results', tournamentOwnerMiddleware, submitMatchResults);
 
